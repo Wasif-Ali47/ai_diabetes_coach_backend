@@ -23,7 +23,15 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(cors());
+
+
+const corsOptions = {
+  origin: 'https://adminnutriguide.vercel.app',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
