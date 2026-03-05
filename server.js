@@ -36,6 +36,8 @@ import reminderRoutes from './routes/reminders.js';
 import doctorRoutes from './routes/doctors.js';
 import chatRoutes from './routes/chat.js';
 import notificationRoutes from './routes/notifications.js';
+import adminRoutes from './routes/admin.js';
+import adminAuthRoutes from './routes/adminAuth.js';
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -46,6 +48,8 @@ app.use('/api/reminders', reminderRoutes);
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/admin/auth', adminAuthRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
