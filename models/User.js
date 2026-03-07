@@ -30,7 +30,8 @@ const userSchema = new mongoose.Schema({
   },
   // Body info
   height: {
-    type: Number, // in cm
+    feet: { type: Number },
+    inches: { type: Number }
   },
   weight: {
     type: Number, // in kg

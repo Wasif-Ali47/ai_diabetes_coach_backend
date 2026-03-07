@@ -5,18 +5,33 @@ import { generateMealPlanWithAI } from '../services/openaiService.js';
 /**
  * Calculate daily calorie target
  */
+// Helper function to convert feet and inches to cm
+function feetInchesToCm(feet, inches) {
+  if (!feet && !inches) return 170; // Default 5'7"
+  const totalInches = (feet || 0) * 12 + (inches || 0);
+  return Math.round(totalInches * 2.54);
+}
+
 function calculateCalorieTarget(user) {
   let bmr;
   const weight = user.weight || 70;
-  const height = user.height || 170;
+  
+  // Convert height from feet/inches to cm
+  let heightCm;
+  if (user.height && (user.height.feet !== undefined || user.height.inches !== undefined)) {
+    heightCm = feetInchesToCm(user.height.feet, user.height.inches);
+  } else {
+    heightCm = 170; // Default 5'7"
+  }
+  
   const age = user.dateOfBirth 
     ? Math.floor((new Date() - new Date(user.dateOfBirth)) / (365.25 * 24 * 60 * 60 * 1000))
     : 30;
 
   if (user.biologicalSex === 'Male') {
-    bmr = 10 * weight + 6.25 * height - 5 * age + 5;
+    bmr = 10 * weight + 6.25 * heightCm - 5 * age + 5;
   } else {
-    bmr = 10 * weight + 6.25 * height - 5 * age - 161;
+    bmr = 10 * weight + 6.25 * heightCm - 5 * age - 161;
   }
 
   const activityMultipliers = {

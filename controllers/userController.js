@@ -115,10 +115,15 @@ export const updateBodyInfo = async (req, res) => {
       });
     }
 
-    const { height, weight, activityLevel } = req.body;
+    const { heightFeet, heightInches, weight, activityLevel } = req.body;
     const updateData = {};
 
-    if (height !== undefined) updateData.height = height;
+    if (heightFeet !== undefined || heightInches !== undefined) {
+      updateData.height = {
+        feet: heightFeet !== undefined ? parseInt(heightFeet) : 0,
+        inches: heightInches !== undefined ? parseInt(heightInches) : 0
+      };
+    }
     if (weight !== undefined) updateData.weight = weight;
     if (activityLevel !== undefined) updateData.activityLevel = activityLevel;
 
