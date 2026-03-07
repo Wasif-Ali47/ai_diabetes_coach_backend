@@ -9,13 +9,13 @@ const symptomLogSchema = new mongoose.Schema({
   symptomType: {
     type: String,
     required: true,
-    enum: ['Blood Sugar', 'Energy', 'Digestion', 'Mood', 'Sleep Quality']
+    enum: ['Fatigue', 'Bloating', 'Nausea', 'Pain Level', 'Energy']
   },
   rating: {
     type: Number,
     required: true,
     min: 1,
-    max: 10
+    max: 5
   },
   notes: String,
   date: {

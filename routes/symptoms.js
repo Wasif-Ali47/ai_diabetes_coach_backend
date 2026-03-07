@@ -7,8 +7,8 @@ const router = express.Router();
 
 // Log a symptom entry
 router.post('/log', authenticate, [
-  body('symptomType').isIn(['Blood Sugar', 'Energy', 'Digestion', 'Mood', 'Sleep Quality']),
-  body('rating').isInt({ min: 1, max: 10 }),
+  body('symptomType').isIn(['Fatigue', 'Bloating', 'Nausea', 'Pain Level', 'Energy']),
+  body('rating').isInt({ min: 1, max: 5 }),
   body('notes').trim().optional(),
   body('date').isISO8601().optional()
 ], symptomController.logSymptom);

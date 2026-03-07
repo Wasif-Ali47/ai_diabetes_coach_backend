@@ -63,6 +63,9 @@ import chatRoutes from './routes/chat.js';
 import notificationRoutes from './routes/notifications.js';
 import adminRoutes from './routes/admin.js';
 import adminAuthRoutes from './routes/adminAuth.js';
+import foodRoutes from './routes/food.js';
+import activityRoutes from './routes/activity.js';
+import progressRoutes from './routes/progress.js';
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -73,6 +76,9 @@ app.use('/api/reminders', reminderRoutes);
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/food', foodRoutes);
+app.use('/api/activity', activityRoutes);
+app.use('/api/progress', progressRoutes);
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin', adminRoutes);
 
