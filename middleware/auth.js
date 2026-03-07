@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 
-export const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+export const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
 
 // Verify JWT token
 export const authenticate = async (req, res, next) => {

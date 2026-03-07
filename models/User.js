@@ -103,6 +103,11 @@ const userSchema = new mongoose.Schema({
   onboardingComplete: {
     type: Boolean,
     default: false
+  },
+  // Admin: User activation status
+  active: {
+    type: Boolean,
+    default: true
   }
 }, {
   timestamps: true

@@ -26,8 +26,25 @@ app.use((req, res, next) => {
 
 
 const corsOptions = {
-  origin: 'https://adminnutriguide.vercel.app',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      'https://adminnutriguide.vercel.app',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:3001',
+    ];
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Allow all for development - restrict in production
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   credentials: true,
 };
 
@@ -87,7 +104,7 @@ app.use((req, res) => {
 });
 
 // Connect to MongoDB
-const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_URI = process.env.MONGODB_URI || "mongodb+srv://yasirkh261:yasirkh261@cluster0.yhwramo.mongodb.net/nutriguide?retryWrites=true&w=majority&appName=Cluster0"
 const PORT = process.env.PORT || 5027;
 
 mongoose.connect(MONGODB_URI)

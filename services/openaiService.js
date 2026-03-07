@@ -2,10 +2,10 @@ import OpenAI from 'openai';
 
 // Initialize OpenAI client (only if API key is provided)
 let openai = null;
-if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your-openai-api-key-here') {
+if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'REMOVED_KEY') {
   try {
     openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY
+      apiKey: process.env.OPENAI_API_KEY || "REMOVED_KEY"
     });
   } catch (error) {
     console.warn('⚠️  OpenAI client initialization failed:', error.message);

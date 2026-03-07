@@ -43,6 +43,15 @@ export const toggleUserActive = async (req, res) => {
     const { id } = req.params;
     const { active } = req.body;
 
+    console.log('[toggleUserActive] Request received:', { id, active });
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required',
+      });
+    }
+
     const user = await User.findByIdAndUpdate(
       id,
       { active: !!active },
@@ -50,19 +59,32 @@ export const toggleUserActive = async (req, res) => {
     ).select('-password');
 
     if (!user) {
+      console.log('[toggleUserActive] User not found:', id);
       return res.status(404).json({
         success: false,
         message: 'User not found',
       });
     }
 
+    console.log('[toggleUserActive] User updated successfully:', {
+      id: user._id,
+      email: user.email,
+      active: user.active,
+    });
+
     res.json({
       success: true,
       message: `User ${active ? 'activated' : 'deactivated'} successfully`,
-      user,
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        active: user.active,
+      },
     });
   } catch (error) {
-    console.error('Admin toggle user active error:', error);
+    console.error('[toggleUserActive] Error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to update user status',
