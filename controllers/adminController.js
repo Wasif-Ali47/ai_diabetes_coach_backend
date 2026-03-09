@@ -1,6 +1,29 @@
 import User from '../models/User.js';
 import MealPlan from '../models/MealPlan.js';
 
+// Initialize Firebase Admin for admin operations (broadcast notifications)
+let admin;
+(async () => {
+  try {
+    const firebaseAdmin = await import('firebase-admin');
+    admin = firebaseAdmin.default;
+
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      if (!admin.apps || admin.apps.length === 0) {
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+        });
+        console.log('[AdminController] Firebase Admin initialized for notifications');
+      }
+    } else {
+      console.log('[AdminController] FIREBASE_SERVICE_ACCOUNT env var not set. Admin notifications disabled.');
+    }
+  } catch (error) {
+    console.log('[AdminController] Firebase Admin not initialized. Admin notifications will be disabled.', error);
+  }
+})();
+
 /**
  * Get all users for admin dashboard
  */
@@ -129,24 +152,101 @@ export const getAllMealPlans = async (req, res) => {
 };
 
 /**
- * Dummy broadcast notification endpoint
+ * Broadcast push notification to all users with registered device tokens
  */
 export const broadcastNotification = async (req, res) => {
   try {
-    const { title, body } = req.body;
+    if (!admin) {
+      return res.status(503).json({
+        success: false,
+        message: 'Push notifications not configured. Firebase Admin not initialized.',
+      });
+    }
 
-    console.log('Admin broadcast notification requested:', {
+    const { title, body } = req.body || {};
+
+    if (!title || !body) {
+      return res.status(400).json({
+        success: false,
+        message: 'Title and body are required',
+      });
+    }
+
+    console.log('[broadcastNotification] Admin broadcast notification requested:', {
       title,
       body,
     });
 
-    // In a real implementation, this would call your notification service.
-    res.json({
+    // Fetch all active users that have at least one registered device token
+    const usersWithTokens = await User.find({
+      'deviceTokens.0': { $exists: true },
+      $or: [{ active: { $exists: false } }, { active: true }],
+    }).select('deviceTokens');
+
+    const tokensSet = new Set();
+    usersWithTokens.forEach((user) => {
+      (user.deviceTokens || []).forEach((dt) => {
+        if (dt?.token) {
+          tokensSet.add(dt.token);
+        }
+      });
+    });
+
+    const allTokens = Array.from(tokensSet);
+
+    if (allTokens.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No device tokens found for any user',
+      });
+    }
+
+    console.log('[broadcastNotification] Total unique device tokens:', allTokens.length);
+
+    // FCM allows up to 500 tokens per multicast request
+    const chunkSize = 500;
+    let totalSuccess = 0;
+    let totalFailure = 0;
+
+    for (let i = 0; i < allTokens.length; i += chunkSize) {
+      const chunk = allTokens.slice(i, i + chunkSize);
+
+      const message = {
+        notification: {
+          title,
+          body,
+        },
+        data: {
+          type: 'broadcast',
+        },
+        tokens: chunk,
+      };
+
+      try {
+        const response = await admin.messaging().sendEachForMulticast(message);
+        totalSuccess += response.successCount || 0;
+        totalFailure += response.failureCount || 0;
+
+        console.log('[broadcastNotification] Chunk result:', {
+          sent: chunk.length,
+          success: response.successCount,
+          failure: response.failureCount,
+        });
+      } catch (err) {
+        console.error('[broadcastNotification] Firebase messaging error for chunk:', err);
+        totalFailure += chunk.length;
+      }
+    }
+
+    return res.json({
       success: true,
-      message: 'Notification broadcast queued (dummy endpoint)',
+      message: 'Broadcast notification sent',
+      totalTokens: allTokens.length,
+      successCount: totalSuccess,
+      failureCount: totalFailure,
     });
   } catch (error) {
-    console.error('Admin broadcast notification error:', error);
+    console.error('[broadcastNotification] Admin broadcast notification error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to send notification',
