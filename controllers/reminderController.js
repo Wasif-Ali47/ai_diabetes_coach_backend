@@ -15,7 +15,31 @@ export const createReminder = async (req, res) => {
       });
     }
 
-    const { title, type, time, enabled = true, daysOfWeek, medication } = req.body;
+    const { title, type, time, enabled = true, daysOfWeek, frequency = 'daily', medication } = req.body;
+
+    // Calculate daysOfWeek based on frequency if not provided
+    let calculatedDaysOfWeek = daysOfWeek;
+    if (!calculatedDaysOfWeek) {
+      switch (frequency) {
+        case 'daily':
+          calculatedDaysOfWeek = [0, 1, 2, 3, 4, 5, 6];
+          break;
+        case 'weekdays':
+          calculatedDaysOfWeek = [1, 2, 3, 4, 5]; // Monday to Friday
+          break;
+        case 'weekends':
+          calculatedDaysOfWeek = [0, 6]; // Sunday and Saturday
+          break;
+        case 'weekly':
+          calculatedDaysOfWeek = [new Date().getDay()]; // Current day
+          break;
+        case 'custom':
+          calculatedDaysOfWeek = daysOfWeek || [];
+          break;
+        default:
+          calculatedDaysOfWeek = [0, 1, 2, 3, 4, 5, 6];
+      }
+    }
 
     const reminder = new Reminder({
       userId: req.userId,
@@ -23,7 +47,8 @@ export const createReminder = async (req, res) => {
       type,
       time,
       enabled,
-      daysOfWeek: daysOfWeek || [0, 1, 2, 3, 4, 5, 6],
+      frequency,
+      daysOfWeek: calculatedDaysOfWeek,
       medication
     });
 

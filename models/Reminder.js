@@ -13,7 +13,12 @@ const reminderSchema = new mongoose.Schema({
   type: {
     type: String,
     required: true,
-    enum: ['medication', 'check', 'meal']
+    enum: ['meal', 'medication', 'water', 'exercise', 'appointment']
+  },
+  frequency: {
+    type: String,
+    enum: ['daily', 'weekdays', 'weekends', 'weekly', 'custom'],
+    default: 'daily'
   },
   time: {
     type: String,

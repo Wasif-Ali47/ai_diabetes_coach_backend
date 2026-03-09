@@ -8,7 +8,8 @@ const router = express.Router();
 // Create a reminder
 router.post('/', authenticate, [
   body('title').trim().notEmpty(),
-  body('type').isIn(['medication', 'check', 'meal']),
+  body('type').isIn(['meal', 'medication', 'water', 'exercise', 'appointment']),
+  body('frequency').isIn(['daily', 'weekdays', 'weekends', 'weekly', 'custom']).optional(),
   body('time').matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
   body('enabled').isBoolean().optional(),
   body('daysOfWeek').isArray().optional(),
@@ -24,7 +25,8 @@ router.get('/:id', authenticate, reminderController.getReminderById);
 // Update reminder
 router.put('/:id', authenticate, [
   body('title').trim().optional(),
-  body('type').isIn(['medication', 'check', 'meal']).optional(),
+  body('type').isIn(['meal', 'medication', 'water', 'exercise', 'appointment']).optional(),
+  body('frequency').isIn(['daily', 'weekdays', 'weekends', 'weekly', 'custom']).optional(),
   body('time').matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).optional(),
   body('enabled').isBoolean().optional(),
   body('daysOfWeek').isArray().optional(),
