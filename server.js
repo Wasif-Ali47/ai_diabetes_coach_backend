@@ -66,6 +66,7 @@ import adminAuthRoutes from './routes/adminAuth.js';
 import foodRoutes from './routes/food.js';
 import activityRoutes from './routes/activity.js';
 import progressRoutes from './routes/progress.js';
+import exportRoutes from './routes/export.js';
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -79,6 +80,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/food', foodRoutes);
 app.use('/api/activity', activityRoutes);
 app.use('/api/progress', progressRoutes);
+app.use('/api/export', exportRoutes);
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin', adminRoutes);
 
