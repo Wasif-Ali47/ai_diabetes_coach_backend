@@ -21,6 +21,7 @@ router.put('/profile/personal', authenticate, [
 router.put('/profile/body', authenticate, [
   body('heightFeet').isInt({ min: 0, max: 8 }).optional(),
   body('heightInches').isInt({ min: 0, max: 11 }).optional(),
+  body('heightCm').isFloat({ min: 0, max: 300 }).optional(),
   body('weight').isNumeric().optional(),
   body('activityLevel').isIn(['Sedentary', 'Lightly Active', 'Moderately Active', 'Very Active', 'Extremely Active']).optional()
 ], userController.updateBodyInfo);

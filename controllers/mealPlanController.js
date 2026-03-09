@@ -16,10 +16,18 @@ function calculateCalorieTarget(user) {
   let bmr;
   const weight = user.weight || 70;
   
-  // Convert height from feet/inches to cm
+  // Convert height to cm - handle both formats
   let heightCm;
-  if (user.height && (user.height.feet !== undefined || user.height.inches !== undefined)) {
-    heightCm = feetInchesToCm(user.height.feet, user.height.inches);
+  if (user.height) {
+    if (user.height.cm !== undefined && user.height.cm !== null) {
+      // User provided height in cm
+      heightCm = user.height.cm;
+    } else if (user.height.feet !== undefined || user.height.inches !== undefined) {
+      // User provided height in feet/inches
+      heightCm = feetInchesToCm(user.height.feet, user.height.inches);
+    } else {
+      heightCm = 170; // Default 5'7"
+    }
   } else {
     heightCm = 170; // Default 5'7"
   }

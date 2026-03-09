@@ -115,10 +115,17 @@ export const updateBodyInfo = async (req, res) => {
       });
     }
 
-    const { heightFeet, heightInches, weight, activityLevel } = req.body;
+    const { heightFeet, heightInches, heightCm, weight, activityLevel } = req.body;
     const updateData = {};
 
-    if (heightFeet !== undefined || heightInches !== undefined) {
+    // Handle height: either feet/inches OR cm
+    if (heightCm !== undefined) {
+      // User provided height in cm
+      updateData.height = {
+        cm: parseFloat(heightCm)
+      };
+    } else if (heightFeet !== undefined || heightInches !== undefined) {
+      // User provided height in feet/inches
       updateData.height = {
         feet: heightFeet !== undefined ? parseInt(heightFeet) : 0,
         inches: heightInches !== undefined ? parseInt(heightInches) : 0
