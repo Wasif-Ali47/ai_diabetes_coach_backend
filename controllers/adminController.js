@@ -2,11 +2,11 @@ import User from '../models/User.js';
 import MealPlan from '../models/MealPlan.js';
 
 // Initialize Firebase Admin for admin operations (broadcast notifications)
-let admin;
+let adminInitialized = false;
 (async () => {
   try {
     const firebaseAdmin = await import('firebase-admin');
-    admin = firebaseAdmin.default;
+    const admin = firebaseAdmin.default;
 
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
       const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -14,13 +14,18 @@ let admin;
         admin.initializeApp({
           credential: admin.credential.cert(serviceAccount),
         });
+        adminInitialized = true;
         console.log('[AdminController] Firebase Admin initialized for notifications');
+      } else {
+        adminInitialized = true;
+        console.log('[AdminController] Firebase Admin already initialized');
       }
     } else {
       console.log('[AdminController] FIREBASE_SERVICE_ACCOUNT env var not set. Admin notifications disabled.');
+      console.log('[AdminController] To enable notifications, set FIREBASE_SERVICE_ACCOUNT environment variable with your Firebase service account JSON.');
     }
   } catch (error) {
-    console.log('[AdminController] Firebase Admin not initialized. Admin notifications will be disabled.', error);
+    console.log('[AdminController] Firebase Admin not initialized. Admin notifications will be disabled.', error.message);
   }
 })();
 
@@ -155,17 +160,35 @@ export const getAllMealPlans = async (req, res) => {
  * Broadcast push notification to all users with registered device tokens
  */
 export const broadcastNotification = async (req, res) => {
+  console.log('[broadcastNotification] Function called');
   try {
-    if (!admin) {
+    // Import firebase-admin dynamically to check if it's available
+    let admin;
+    try {
+      const firebaseAdmin = await import('firebase-admin');
+      admin = firebaseAdmin.default;
+    } catch (err) {
+      console.error('[broadcastNotification] Failed to import firebase-admin:', err);
       return res.status(503).json({
         success: false,
-        message: 'Push notifications not configured. Firebase Admin not initialized.',
+        message: 'Push notifications not configured. Firebase Admin SDK not available.',
+      });
+    }
+
+    console.log('[broadcastNotification] Checking admin initialization, initialized:', adminInitialized);
+    if (!adminInitialized || !admin.apps || admin.apps.length === 0) {
+      console.log('[broadcastNotification] Admin not initialized - returning 503');
+      return res.status(503).json({
+        success: false,
+        message: 'Push notifications not configured. Firebase Admin not initialized. Please set FIREBASE_SERVICE_ACCOUNT environment variable.',
       });
     }
 
     const { title, body } = req.body || {};
+    console.log('[broadcastNotification] Extracted title and body:', { title, body });
 
     if (!title || !body) {
+      console.log('[broadcastNotification] Missing title or body - returning 400');
       return res.status(400).json({
         success: false,
         message: 'Title and body are required',
@@ -178,10 +201,12 @@ export const broadcastNotification = async (req, res) => {
     });
 
     // Fetch all active users that have at least one registered device token
+    console.log('[broadcastNotification] Querying users with device tokens...');
     const usersWithTokens = await User.find({
       'deviceTokens.0': { $exists: true },
       $or: [{ active: { $exists: false } }, { active: true }],
     }).select('deviceTokens');
+    console.log('[broadcastNotification] Query completed, found users:', usersWithTokens.length);
 
     const tokensSet = new Set();
     usersWithTokens.forEach((user) => {
@@ -194,14 +219,19 @@ export const broadcastNotification = async (req, res) => {
 
     const allTokens = Array.from(tokensSet);
 
+    console.log('[broadcastNotification] Found users with tokens:', usersWithTokens.length);
+    console.log('[broadcastNotification] Total unique device tokens:', allTokens.length);
+
     if (allTokens.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'No device tokens found for any user',
+      console.log('[broadcastNotification] No tokens found - returning success with message');
+      return res.status(200).json({
+        success: true,
+        message: 'No device tokens found. Notification not sent. Users need to open the app at least once to register their device tokens.',
+        totalTokens: 0,
+        successCount: 0,
+        failureCount: 0,
       });
     }
-
-    console.log('[broadcastNotification] Total unique device tokens:', allTokens.length);
 
     // FCM allows up to 500 tokens per multicast request
     const chunkSize = 500;
@@ -238,6 +268,7 @@ export const broadcastNotification = async (req, res) => {
       }
     }
 
+    console.log('[broadcastNotification] Sending success response');
     return res.json({
       success: true,
       message: 'Broadcast notification sent',
@@ -247,7 +278,8 @@ export const broadcastNotification = async (req, res) => {
     });
   } catch (error) {
     console.error('[broadcastNotification] Admin broadcast notification error:', error);
-    res.status(500).json({
+    console.error('[broadcastNotification] Error stack:', error.stack);
+    return res.status(500).json({
       success: false,
       message: 'Failed to send notification',
       error: error.message,

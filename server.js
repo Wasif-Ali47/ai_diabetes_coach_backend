@@ -84,6 +84,13 @@ app.use('/api/export', exportRoutes);
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin', adminRoutes);
 
+// Log registered admin routes on startup
+console.log('📋 Admin routes registered:');
+console.log('   GET  /api/admin/test');
+console.log('   GET  /api/admin/users');
+console.log('   GET  /api/admin/meal-plans');
+console.log('   POST /api/admin/notifications/broadcast');
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ 
