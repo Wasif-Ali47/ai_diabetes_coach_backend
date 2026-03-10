@@ -7,25 +7,63 @@ let adminInitialized = false;
   try {
     const firebaseAdmin = await import('firebase-admin');
     const admin = firebaseAdmin.default;
+    const fs = await import('fs');
+    const path = await import('path');
+    const { fileURLToPath } = await import('url');
+    const { dirname } = await import('path');
 
+    let serviceAccount = null;
+
+    // Try to get service account from environment variable first
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      try {
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+        console.log('[AdminController] Using FIREBASE_SERVICE_ACCOUNT from environment variable');
+      } catch (e) {
+        console.log('[AdminController] Failed to parse FIREBASE_SERVICE_ACCOUNT env var, trying file...');
+      }
+    }
+
+    // If not in env var, try to read from file
+    if (!serviceAccount) {
+      try {
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = dirname(__filename);
+        const serviceAccountPath = path.join(__dirname, '..', 'firebase-service-account.json');
+        
+        if (fs.existsSync(serviceAccountPath)) {
+          const fileContent = fs.readFileSync(serviceAccountPath, 'utf8');
+          serviceAccount = JSON.parse(fileContent);
+          console.log('[AdminController] Loaded Firebase service account from file: firebase-service-account.json');
+        } else {
+          console.log('[AdminController] firebase-service-account.json not found at:', serviceAccountPath);
+        }
+      } catch (fileError) {
+        console.log('[AdminController] Error reading firebase-service-account.json:', fileError.message);
+      }
+    }
+
+    if (serviceAccount) {
       if (!admin.apps || admin.apps.length === 0) {
         admin.initializeApp({
           credential: admin.credential.cert(serviceAccount),
         });
         adminInitialized = true;
-        console.log('[AdminController] Firebase Admin initialized for notifications');
+        console.log('[AdminController] ✅ Firebase Admin initialized for notifications');
       } else {
         adminInitialized = true;
-        console.log('[AdminController] Firebase Admin already initialized');
+        console.log('[AdminController] ✅ Firebase Admin already initialized');
       }
     } else {
-      console.log('[AdminController] FIREBASE_SERVICE_ACCOUNT env var not set. Admin notifications disabled.');
-      console.log('[AdminController] To enable notifications, set FIREBASE_SERVICE_ACCOUNT environment variable with your Firebase service account JSON.');
+      console.log('[AdminController] ❌ FIREBASE_SERVICE_ACCOUNT env var not set and firebase-service-account.json not found.');
+      console.log('[AdminController] Admin notifications will be disabled.');
+      console.log('[AdminController] To enable notifications:');
+      console.log('[AdminController]   1. Set FIREBASE_SERVICE_ACCOUNT environment variable with your Firebase service account JSON, OR');
+      console.log('[AdminController]   2. Place firebase-service-account.json in the backend directory');
     }
   } catch (error) {
-    console.log('[AdminController] Firebase Admin not initialized. Admin notifications will be disabled.', error.message);
+    console.log('[AdminController] ❌ Firebase Admin initialization error:', error.message);
+    console.log('[AdminController] Stack:', error.stack);
   }
 })();
 
