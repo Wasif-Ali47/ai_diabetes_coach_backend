@@ -26,8 +26,15 @@ let admin;
  */
 export const registerToken = async (req, res) => {
   try {
+    console.log('[registerToken] Request received:', {
+      hasAuth: !!req.userId,
+      userId: req.userId,
+      bodyUserId: req.body.userId,
+    });
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('[registerToken] Validation errors:', errors.array());
       return res.status(400).json({
         success: false,
         message: 'Validation error',
@@ -37,38 +44,98 @@ export const registerToken = async (req, res) => {
 
     const { token, userId, deviceType, deviceInfo } = req.body;
 
-    const targetUserId = req.userId || userId || 'guest_user';
+    if (!token) {
+      console.log('[registerToken] No token provided');
+      return res.status(400).json({
+        success: false,
+        message: 'Token is required'
+      });
+    }
 
-    let user;
+    // Determine target user: authenticated user > userId from body > find/create guest user
+    let targetUser = null;
     
     if (req.userId) {
-      user = await User.findById(req.userId);
-    } else if (userId && userId !== 'guest_user') {
-      user = await User.findById(userId);
-    }
-
-    if (user) {
-      const existingToken = user.deviceTokens.find(
-        dt => dt.token === token
-      );
-
-      if (!existingToken) {
-        user.deviceTokens.push({
-          token,
-          deviceType: deviceType || 'android',
-          deviceInfo: deviceInfo || {}
+      // User is authenticated - use their account
+      console.log('[registerToken] User authenticated, userId:', req.userId);
+      targetUser = await User.findById(req.userId);
+      if (!targetUser) {
+        console.log('[registerToken] Authenticated user not found:', req.userId);
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
         });
-        await user.save();
+      }
+    } else if (userId && userId !== 'guest_user') {
+      // User ID provided in body
+      console.log('[registerToken] Using userId from body:', userId);
+      targetUser = await User.findById(userId);
+      if (!targetUser) {
+        console.log('[registerToken] User from body not found:', userId);
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+    } else {
+      // No authenticated user - try to find or create a guest user
+      // For now, we'll create a guest user with a temporary email
+      // In production, you might want to handle this differently
+      console.log('[registerToken] No authenticated user, creating/finding guest user');
+      
+      // Try to find an existing guest user (you might want to use device ID or similar)
+      // For simplicity, we'll create a guest user with token-based email
+      const guestEmail = `guest_${token.substring(0, 10)}@nutriguide.app`;
+      targetUser = await User.findOne({ email: guestEmail });
+      
+      if (!targetUser) {
+        console.log('[registerToken] Creating new guest user');
+        targetUser = new User({
+          email: guestEmail,
+          // No password for guest users
+        });
+        await targetUser.save();
+        console.log('[registerToken] Guest user created:', targetUser._id);
+      } else {
+        console.log('[registerToken] Found existing guest user:', targetUser._id);
       }
     }
+
+    // Check if token already exists
+    const existingTokenIndex = targetUser.deviceTokens.findIndex(
+      dt => dt.token === token
+    );
+
+    if (existingTokenIndex >= 0) {
+      console.log('[registerToken] Token already exists, updating device info');
+      // Update existing token's device info
+      targetUser.deviceTokens[existingTokenIndex].deviceType = deviceType || targetUser.deviceTokens[existingTokenIndex].deviceType || 'android';
+      targetUser.deviceTokens[existingTokenIndex].deviceInfo = deviceInfo || targetUser.deviceTokens[existingTokenIndex].deviceInfo || {};
+      targetUser.deviceTokens[existingTokenIndex].registeredAt = new Date();
+    } else {
+      console.log('[registerToken] Adding new token to user');
+      // Add new token
+      targetUser.deviceTokens.push({
+        token,
+        deviceType: deviceType || 'android',
+        deviceInfo: deviceInfo || {},
+        registeredAt: new Date()
+      });
+    }
+
+    await targetUser.save();
+    console.log('[registerToken] Token registered successfully for user:', targetUser._id);
+    console.log('[registerToken] Total tokens for user:', targetUser.deviceTokens.length);
 
     res.json({
       success: true,
       message: 'Device token registered successfully',
-      token
+      token,
+      userId: targetUser._id.toString()
     });
   } catch (error) {
-    console.error('Register token error:', error);
+    console.error('[registerToken] Error:', error);
+    console.error('[registerToken] Stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Failed to register device token',
