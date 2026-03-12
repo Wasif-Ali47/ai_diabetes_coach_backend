@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 
 // Initialize OpenAI client (only if API key is provided)
 let openai = null;
-if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'REMOVED_KEY') {
+if ('REMOVED_KEY') {
   try {
     openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY || "REMOVED_KEY"
@@ -19,6 +19,7 @@ if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'REMOVED_KEY') 
  */
 export async function generateMealPlanWithAI(user, dailyCalorieTarget, dailyMacroTargets, dayNumber) {
   // Check if OpenAI is initialized
+  console.log('OpenAI client:', openai ? 'initialized' : 'not initialized');
   if (!openai) {
     console.warn('OpenAI not initialized, returning null to use fallback meals');
     return null;
