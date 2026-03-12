@@ -50,6 +50,14 @@ Generate a complete day's meal plan with:
 3. Dinner (around 30% of daily calories)
 4. Snack (around 10% of daily calories)
 
+Make sure meals are varied, nutritious, and appropriate for the user's health conditions.
+
+IMPORTANT RULES:
+- Do NOT repeat common meals like oatmeal, grilled chicken, or brown rice unless necessary
+- Use different cuisines (Mediterranean, Asian, Middle Eastern, etc.)
+- Ensure each day is unique
+- Avoid repeating meals from previous days
+
 For each meal, provide:
 - Meal name (creative and appetizing)
 - Calories (exact number)
@@ -87,7 +95,7 @@ Make sure meals are varied, nutritious, and appropriate for the user's health co
           content: prompt
         }
       ],
-      temperature: 0.7,
+      temperature: 1,
       max_tokens: 2000
     });
 
