@@ -1,6 +1,6 @@
 import MealPlan from '../models/MealPlan.js';
 import User from '../models/User.js';
-import { generateMealPlanWithAI } from '../services/openaiService.js';
+import { generateMealPlanWithAI, generateMealPlanDayWithAI } from '../services/openaiService.js';
 
 /**
  * Calculate daily calorie target
@@ -69,12 +69,15 @@ function calculateMacroTargets(calories) {
 
 
 export const generateMealPlan = async (req, res) => {
+  const startTime = Date.now();
   try {
+    console.log('[generateMealPlan] Starting meal plan generation...');
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
     const dailyCalorieTarget = calculateCalorieTarget(user);
     const dailyMacroTargets = calculateMacroTargets(dailyCalorieTarget);
+    console.log(`[generateMealPlan] User profile loaded. Calorie target: ${dailyCalorieTarget}kcal`);
 
     const startDate = new Date();
     startDate.setHours(0, 0, 0, 0);
@@ -85,44 +88,72 @@ export const generateMealPlan = async (req, res) => {
     await MealPlan.updateMany({ userId: req.userId, isActive: true }, { isActive: false });
 
     const days = [];
+    let aiDays = null;
 
+    // Try to generate all 7 days in one API call (faster)
+    try {
+      console.log('[generateMealPlan] Attempting to generate full 7-day plan in one API call...');
+      aiDays = await generateMealPlanWithAI(user, dailyCalorieTarget, dailyMacroTargets);
+      
+      if (aiDays && Array.isArray(aiDays) && aiDays.length >= 7) {
+        console.log('[generateMealPlan] ✅ Successfully generated full 7-day plan in one call');
+      } else {
+        throw new Error('Incomplete 7-day plan received');
+      }
+    } catch (err) {
+      console.warn('[generateMealPlan] Full plan generation failed, falling back to parallel per-day generation:', err.message);
+      aiDays = null;
+    }
+
+    // If full plan failed, generate days in parallel (much faster than sequential)
+    if (!aiDays) {
+      console.log('[generateMealPlan] Generating days in parallel...');
+      const dayPromises = [];
+      
+      for (let i = 0; i < 7; i++) {
+        dayPromises.push(
+          generateMealPlanDayWithAI(user, dailyCalorieTarget, dailyMacroTargets, i + 1)
+            .catch(err => {
+              console.warn(`[generateMealPlan] Day ${i + 1} AI generation failed, will use fallback:`, err.message);
+              return null; // Return null to trigger fallback
+            })
+        );
+      }
+
+      // Wait for all days in parallel (max 15 seconds instead of 7 × 15 = 105 seconds)
+      const dayResults = await Promise.all(dayPromises);
+      
+      // Convert to same format as full plan response
+      aiDays = dayResults.map((meals, index) => ({
+        meals: meals || [] // Will be replaced with fallback if null
+      }));
+    }
+
+    // Process each day
     for (let i = 0; i < 7; i++) {
       const dayDate = new Date(startDate);
       dayDate.setDate(dayDate.getDate() + i);
 
-      let meals;
-      try {
-        meals = await generateMealPlanWithAI(user, dailyCalorieTarget, dailyMacroTargets, i + 1);
+      let meals = aiDays[i]?.meals || [];
 
-        // The OpenAI service currently returns an object shaped like:
-        // [{ meals: [ ... ] }, { meals: [ ... ] }, ...]
-        // Instead of a flat array of meals. Normalize that here.
-        if (Array.isArray(meals) && meals.length > 0 && meals[0]?.meals) {
-          const aiDays = meals;
-          const aiDayIndex = i % aiDays.length;
-          meals = aiDays[aiDayIndex]?.meals || [];
-        }
+      // Validate meals or use fallback
+      const hasValidMeals =
+        Array.isArray(meals) &&
+        meals.length >= 4 &&
+        meals.every(
+          (m) =>
+            m &&
+            typeof m.name === 'string' &&
+            m.name.trim().length > 0 &&
+            typeof m.mealType === 'string' &&
+            m.mealType.trim().length > 0 &&
+            typeof m.calories === 'number' &&
+            !Number.isNaN(m.calories) &&
+            m.calories > 0
+        );
 
-        // Validate that we have proper meal objects; otherwise, trigger fallback.
-        const hasValidMeals =
-          Array.isArray(meals) &&
-          meals.length > 0 &&
-          meals.every(
-            (m) =>
-              m &&
-              typeof m.name === 'string' &&
-              m.name.trim().length > 0 &&
-              typeof m.mealType === 'string' &&
-              m.mealType.trim().length > 0 &&
-              typeof m.calories === 'number' &&
-              !Number.isNaN(m.calories)
-          );
-
-        if (!hasValidMeals) {
-          throw new Error('AI returned invalid meals structure');
-        }
-      } catch (err) {
-        console.warn(`OpenAI failed or invalid response for day ${i + 1}. Using fallback meals.`, err.message);
+      if (!hasValidMeals) {
+        console.warn(`[generateMealPlan] Day ${i + 1} meals invalid, using fallback`);
         meals = getFallbackMeals(i, dailyCalorieTarget);
       }
 
@@ -157,13 +188,17 @@ export const generateMealPlan = async (req, res) => {
 
     await mealPlan.save();
 
+    const totalTime = Date.now() - startTime;
+    console.log(`[generateMealPlan] ✅ Meal plan generated successfully in ${totalTime}ms`);
+
     res.status(201).json({
       success: true,
       message: "Meal plan generated successfully",
       mealPlan,
     });
   } catch (error) {
-    console.error("Generate meal plan error:", error);
+    const totalTime = Date.now() - startTime;
+    console.error(`[generateMealPlan] ❌ Error after ${totalTime}ms:`, error);
     res.status(500).json({
       success: false,
       message: "Failed to generate meal plan",
@@ -413,15 +448,32 @@ export const updateMealPlanDay = async (req, res) => {
 };
 
 /**
- * Fallback meals if OpenAI fails
+ * Fallback meals if OpenAI fails - provides variety across 7 days
  */
 function getFallbackMeals(dayIndex, calorieTarget) {
+  const breakfastCal = Math.round(calorieTarget * 0.25);
+  const lunchCal = Math.round(calorieTarget * 0.35);
+  const dinnerCal = Math.round(calorieTarget * 0.30);
+  const snackCal = Math.round(calorieTarget * 0.10);
+
   const mealTemplates = [
     {
-      breakfast: { mealType: 'Breakfast', name: 'Steel-Cut Oats & Berries', calories: 380, macros: { carbs: 45, protein: 12, fat: 8 }, tags: ['Low GI', 'Heart-Smart'], ingredients: ['Oats', 'Berries', 'Almonds'] },
-      lunch: { mealType: 'Lunch', name: 'Mediterranean Chickpea Bowl', calories: 490, macros: { carbs: 58, protein: 18, fat: 15 }, tags: ['Low Sodium'], ingredients: ['Chickpeas', 'Vegetables', 'Olive Oil'] },
-      dinner: { mealType: 'Dinner', name: 'Baked Salmon, Greens & Quinoa', calories: 560, macros: { carbs: 52, protein: 38, fat: 22 }, tags: ['Low GI', 'Omega-3'], ingredients: ['Salmon', 'Quinoa', 'Greens'] },
-      snack: { mealType: 'Snack', name: 'Apple + Almond Butter', calories: 200, macros: { carbs: 27, protein: 4, fat: 10 }, tags: ['Low GI'], ingredients: ['Apple', 'Almond Butter'] }
+      breakfast: { mealType: 'Breakfast', name: 'Steel-Cut Oats & Berries', description: 'Nutritious whole grain oats topped with fresh berries and almonds', calories: breakfastCal, macros: { carbs: Math.round(breakfastCal * 0.5 / 4), protein: Math.round(breakfastCal * 0.15 / 4), fat: Math.round(breakfastCal * 0.35 / 9) }, tags: ['Low GI', 'Heart-Smart'], ingredients: ['Oats', 'Berries', 'Almonds'] },
+      lunch: { mealType: 'Lunch', name: 'Mediterranean Chickpea Bowl', description: 'Protein-rich chickpeas with fresh vegetables and olive oil', calories: lunchCal, macros: { carbs: Math.round(lunchCal * 0.5 / 4), protein: Math.round(lunchCal * 0.15 / 4), fat: Math.round(lunchCal * 0.35 / 9) }, tags: ['Low Sodium'], ingredients: ['Chickpeas', 'Vegetables', 'Olive Oil'] },
+      dinner: { mealType: 'Dinner', name: 'Baked Salmon, Greens & Quinoa', description: 'Omega-3 rich salmon with whole grain quinoa and leafy greens', calories: dinnerCal, macros: { carbs: Math.round(dinnerCal * 0.4 / 4), protein: Math.round(dinnerCal * 0.35 / 4), fat: Math.round(dinnerCal * 0.25 / 9) }, tags: ['Low GI', 'Omega-3'], ingredients: ['Salmon', 'Quinoa', 'Greens'] },
+      snack: { mealType: 'Snack', name: 'Apple + Almond Butter', description: 'Fresh apple slices with natural almond butter', calories: snackCal, macros: { carbs: Math.round(snackCal * 0.5 / 4), protein: Math.round(snackCal * 0.1 / 4), fat: Math.round(snackCal * 0.4 / 9) }, tags: ['Low GI'], ingredients: ['Apple', 'Almond Butter'] }
+    },
+    {
+      breakfast: { mealType: 'Breakfast', name: 'Greek Yogurt Parfait', description: 'Protein-packed Greek yogurt with granola and fresh fruit', calories: breakfastCal, macros: { carbs: Math.round(breakfastCal * 0.45 / 4), protein: Math.round(breakfastCal * 0.25 / 4), fat: Math.round(breakfastCal * 0.30 / 9) }, tags: ['High Protein'], ingredients: ['Greek Yogurt', 'Granola', 'Berries'] },
+      lunch: { mealType: 'Lunch', name: 'Grilled Chicken Salad', description: 'Lean grilled chicken over mixed greens with vinaigrette', calories: lunchCal, macros: { carbs: Math.round(lunchCal * 0.25 / 4), protein: Math.round(lunchCal * 0.40 / 4), fat: Math.round(lunchCal * 0.35 / 9) }, tags: ['High Protein', 'Low Carb'], ingredients: ['Chicken', 'Mixed Greens', 'Vinaigrette'] },
+      dinner: { mealType: 'Dinner', name: 'Vegetable Stir-Fry with Tofu', description: 'Colorful vegetables and tofu in a light soy sauce', calories: dinnerCal, macros: { carbs: Math.round(dinnerCal * 0.45 / 4), protein: Math.round(dinnerCal * 0.25 / 4), fat: Math.round(dinnerCal * 0.30 / 9) }, tags: ['Vegetarian'], ingredients: ['Tofu', 'Mixed Vegetables', 'Soy Sauce'] },
+      snack: { mealType: 'Snack', name: 'Mixed Nuts & Dried Fruit', description: 'A healthy mix of nuts and dried fruits', calories: snackCal, macros: { carbs: Math.round(snackCal * 0.35 / 4), protein: Math.round(snackCal * 0.15 / 4), fat: Math.round(snackCal * 0.50 / 9) }, tags: ['Heart-Smart'], ingredients: ['Almonds', 'Walnuts', 'Dried Apricots'] }
+    },
+    {
+      breakfast: { mealType: 'Breakfast', name: 'Avocado Toast with Eggs', description: 'Whole grain toast topped with avocado and poached eggs', calories: breakfastCal, macros: { carbs: Math.round(breakfastCal * 0.35 / 4), protein: Math.round(breakfastCal * 0.25 / 4), fat: Math.round(breakfastCal * 0.40 / 9) }, tags: ['High Protein'], ingredients: ['Whole Grain Bread', 'Avocado', 'Eggs'] },
+      lunch: { mealType: 'Lunch', name: 'Lentil Soup with Whole Grain Bread', description: 'Hearty lentil soup served with whole grain bread', calories: lunchCal, macros: { carbs: Math.round(lunchCal * 0.55 / 4), protein: Math.round(lunchCal * 0.20 / 4), fat: Math.round(lunchCal * 0.25 / 9) }, tags: ['High Fiber'], ingredients: ['Lentils', 'Vegetables', 'Whole Grain Bread'] },
+      dinner: { mealType: 'Dinner', name: 'Grilled Fish with Sweet Potato', description: 'Grilled white fish with roasted sweet potato and vegetables', calories: dinnerCal, macros: { carbs: Math.round(dinnerCal * 0.40 / 4), protein: Math.round(dinnerCal * 0.30 / 4), fat: Math.round(dinnerCal * 0.30 / 9) }, tags: ['Omega-3'], ingredients: ['White Fish', 'Sweet Potato', 'Broccoli'] },
+      snack: { mealType: 'Snack', name: 'Hummus with Veggie Sticks', description: 'Creamy hummus with fresh vegetable sticks', calories: snackCal, macros: { carbs: Math.round(snackCal * 0.45 / 4), protein: Math.round(snackCal * 0.15 / 4), fat: Math.round(snackCal * 0.40 / 9) }, tags: ['Vegetarian'], ingredients: ['Hummus', 'Carrots', 'Cucumber'] }
     }
   ];
 

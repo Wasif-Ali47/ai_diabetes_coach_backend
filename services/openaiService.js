@@ -8,8 +8,13 @@ if ('REMOVED_KEY') {
   console.warn('⚠️  OPENAI_API_KEY not set. AI features will use fallback responses.');
 }
 
-export async function generateMealPlanWithAI(user, dailyCalorieTarget, dailyMacroTargets) {
+/**
+ * Generate a single day's meal plan (optimized for parallel processing)
+ */
+export async function generateMealPlanDayWithAI(user, dailyCalorieTarget, dailyMacroTargets, dayNumber) {
   if (!openai) return null;
+
+  const timeout = 15000; // 15 second timeout per day
 
   try {
     const healthConditions = user.healthConditions?.join(', ') || 'None';
@@ -19,47 +24,108 @@ export async function generateMealPlanWithAI(user, dailyCalorieTarget, dailyMacr
     const glutenFree = user.dietPreferences?.glutenFree ? 'Yes' : 'No';
     const dairyFree = user.dietPreferences?.dairyFree ? 'Yes' : 'No';
 
-    const prompt = `
-You are a professional nutritionist. Generate a personalized 7-day meal plan for a user.
+    const prompt = `Generate Day ${dayNumber} meal plan (4 meals: Breakfast ~${Math.round(dailyCalorieTarget * 0.25)}kcal, Lunch ~${Math.round(dailyCalorieTarget * 0.35)}kcal, Dinner ~${Math.round(dailyCalorieTarget * 0.30)}kcal, Snack ~${Math.round(dailyCalorieTarget * 0.10)}kcal).
 
-User Profile:
-- Daily Calorie Target: ${dailyCalorieTarget} kcal
-- Daily Macro Targets: Carbs ${dailyMacroTargets.carbs}g, Protein ${dailyMacroTargets.protein}g, Fat ${dailyMacroTargets.fat}g
-- Health Conditions: ${healthConditions}
-- Allergies: ${allergies}
-- Vegetarian: ${vegetarian}
-- Vegan: ${vegan}
-- Gluten-Free: ${glutenFree}
-- Dairy-Free: ${dairyFree}
+User: ${dailyCalorieTarget}kcal/day, Carbs:${dailyMacroTargets.carbs}g Protein:${dailyMacroTargets.protein}g Fat:${dailyMacroTargets.fat}g. Conditions:${healthConditions}. Allergies:${allergies}. Diet:${vegetarian === 'Yes' ? 'Vegetarian' : ''}${vegan === 'Yes' ? 'Vegan' : ''}${glutenFree === 'Yes' ? 'Gluten-Free' : ''}${dairyFree === 'Yes' ? 'Dairy-Free' : ''}
 
-Guidelines:
-- Each day must have 4 meals: Breakfast (~25%), Lunch (~35%), Dinner (~30%), Snack (~10%).
-- Make each day unique, varied cuisines, avoid repetition.
-- Return ONLY JSON in this format:
+Return JSON only:
+{"meals":[{"mealType":"Breakfast","name":"...","description":"...","calories":0,"macros":{"carbs":0,"protein":0,"fat":0},"tags":["..."],"ingredients":["..."]},{"mealType":"Lunch",...},{"mealType":"Dinner",...},{"mealType":"Snack",...}]}`;
 
-{
-  "days": [
-    {
-      "meals": [
-        {"mealType":"Breakfast","name":"...","description":"...","calories":0,"macros":{"carbs":0,"protein":0,"fat":0},"tags":["..."],"ingredients":["..."]},
-        {"mealType":"Lunch", ... },
-        {"mealType":"Dinner", ... },
-        {"mealType":"Snack", ... }
-      ]
-    }
-  ]
-}`;
-
-    const response = await openai.chat.completions.create({
+    const responsePromise = openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
-        { role: 'system', content: 'You are a professional nutritionist. Respond with valid JSON only.' },
+        { role: 'system', content: 'You are a nutritionist. Return valid JSON only, no markdown.' },
         { role: 'user', content: prompt }
       ],
-      temperature: 1,
-      max_tokens: 3500
+      temperature: 0.8,
+      max_tokens: 1200 // Reduced for faster response
     });
 
+    // Add timeout
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('OpenAI request timeout')), timeout)
+    );
+
+    const response = await Promise.race([responsePromise, timeoutPromise]);
+    const content = response.choices[0].message.content.trim();
+
+    // Parse JSON response
+    let mealData;
+    try {
+      const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
+      const jsonString = jsonMatch ? jsonMatch[1] : content;
+      mealData = JSON.parse(jsonString);
+    } catch (parseError) {
+      console.error(`Failed to parse OpenAI response for day ${dayNumber}:`, parseError);
+      throw new Error('Failed to parse meal plan response');
+    }
+
+    // Validate and normalize response
+    const meals = (mealData.meals || mealData.days?.[0]?.meals || []).map(meal => ({
+      mealType: meal.mealType || '',
+      name: meal.name || '',
+      description: meal.description || '',
+      calories: typeof meal.calories === 'number' ? meal.calories : 0,
+      macros: {
+        carbs: meal.macros?.carbs || 0,
+        protein: meal.macros?.protein || 0,
+        fat: meal.macros?.fat || 0
+      },
+      tags: meal.tags || [],
+      ingredients: meal.ingredients || []
+    }));
+
+    // Validate required fields
+    if (meals.length !== 4 || !meals.every(m => m.name && m.mealType && m.calories > 0)) {
+      throw new Error('Invalid meal structure');
+    }
+
+    return meals;
+  } catch (error) {
+    console.error(`OpenAI meal plan generation error for day ${dayNumber}:`, error.message);
+    throw error;
+  }
+}
+
+/**
+ * Generate full 7-day meal plan in one API call (faster but less flexible)
+ */
+export async function generateMealPlanWithAI(user, dailyCalorieTarget, dailyMacroTargets) {
+  if (!openai) return null;
+
+  const timeout = 30000; // 30 second timeout for full plan
+
+  try {
+    const healthConditions = user.healthConditions?.join(', ') || 'None';
+    const allergies = user.dietPreferences?.allergies?.join(', ') || 'None';
+    const vegetarian = user.dietPreferences?.vegetarian ? 'Yes' : 'No';
+    const vegan = user.dietPreferences?.vegan ? 'Yes' : 'No';
+    const glutenFree = user.dietPreferences?.glutenFree ? 'Yes' : 'No';
+    const dairyFree = user.dietPreferences?.dairyFree ? 'Yes' : 'No';
+
+    const prompt = `Generate 7-day meal plan. Each day: 4 meals (Breakfast ~${Math.round(dailyCalorieTarget * 0.25)}kcal, Lunch ~${Math.round(dailyCalorieTarget * 0.35)}kcal, Dinner ~${Math.round(dailyCalorieTarget * 0.30)}kcal, Snack ~${Math.round(dailyCalorieTarget * 0.10)}kcal).
+
+User: ${dailyCalorieTarget}kcal/day, Carbs:${dailyMacroTargets.carbs}g Protein:${dailyMacroTargets.protein}g Fat:${dailyMacroTargets.fat}g. Conditions:${healthConditions}. Allergies:${allergies}. Diet:${vegetarian === 'Yes' ? 'Vegetarian' : ''}${vegan === 'Yes' ? 'Vegan' : ''}${glutenFree === 'Yes' ? 'Gluten-Free' : ''}${dairyFree === 'Yes' ? 'Dairy-Free' : ''}
+
+Return JSON only:
+{"days":[{"meals":[{"mealType":"Breakfast","name":"...","description":"...","calories":0,"macros":{"carbs":0,"protein":0,"fat":0},"tags":["..."],"ingredients":["..."]},...]},...]}`;
+
+    const responsePromise = openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: 'You are a nutritionist. Return valid JSON only, no markdown.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.8,
+      max_tokens: 4000
+    });
+
+    // Add timeout
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('OpenAI request timeout')), timeout)
+    );
+
+    const response = await Promise.race([responsePromise, timeoutPromise]);
     const content = response.choices[0].message.content.trim();
 
     // Parse JSON response
@@ -76,11 +142,15 @@ Guidelines:
     // Convert into our format
     const days = mealPlanData.days.map(day => ({
       meals: day.meals.map(meal => ({
-        mealType: meal.mealType,
-        name: meal.name,
-        description: meal.description,
-        calories: meal.calories,
-        macros: meal.macros,
+        mealType: meal.mealType || '',
+        name: meal.name || '',
+        description: meal.description || '',
+        calories: typeof meal.calories === 'number' ? meal.calories : 0,
+        macros: {
+          carbs: meal.macros?.carbs || 0,
+          protein: meal.macros?.protein || 0,
+          fat: meal.macros?.fat || 0
+        },
         tags: meal.tags || [],
         ingredients: meal.ingredients || []
       }))
@@ -88,7 +158,7 @@ Guidelines:
 
     return days;
   } catch (error) {
-    console.error('OpenAI meal plan generation error:', error);
+    console.error('OpenAI meal plan generation error:', error.message);
     throw error;
   }
 }
