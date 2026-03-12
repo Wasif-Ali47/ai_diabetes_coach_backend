@@ -5,7 +5,7 @@ let openai = null;
 if ('REMOVED_KEY') {
   try {
     openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY || "REMOVED_KEY"
+      apiKey:  "REMOVED_KEY"
     });
   } catch (error) {
     console.warn('⚠️  OpenAI client initialization failed:', error.message);
