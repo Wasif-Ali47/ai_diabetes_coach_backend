@@ -2,8 +2,8 @@ import OpenAI from 'openai';
 
 let openai = null;
 
-if (process.env.OPENAI_API_KEY) {
-  openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+if ('REMOVED_KEY') {
+  openai = new OpenAI({ apiKey: 'REMOVED_KEY' });
 } else {
   console.warn('⚠️  OPENAI_API_KEY not set. AI features will use fallback responses.');
 }
