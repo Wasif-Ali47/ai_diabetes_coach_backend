@@ -74,73 +74,52 @@ export const generateMealPlan = async (req, res) => {
   try {
     const user = await User.findById(req.userId);
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
+      return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // Calculate daily calorie target
+    // Calculate daily calorie and macro targets
     const dailyCalorieTarget = calculateCalorieTarget(user);
     const dailyMacroTargets = calculateMacroTargets(dailyCalorieTarget);
 
-    // Generate 7-day meal plan
+    // Deactivate existing active plans
+    await MealPlan.updateMany({ userId: req.userId, isActive: true }, { isActive: false });
+
+    // Generate 7-day meal plan in ONE API call
+    const days = await generateMealPlanWithAI(user, dailyCalorieTarget, dailyMacroTargets);
+
+    if (!days || days.length === 0) {
+      return res.status(500).json({ success: false, message: 'Failed to generate meal plan from OpenAI' });
+    }
+
+    // Set start and end dates
     const startDate = new Date();
     startDate.setHours(0, 0, 0, 0);
     const endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + 6);
 
-    // Deactivate existing active plans
-    await MealPlan.updateMany(
-      { userId: req.userId, isActive: true },
-      { isActive: false }
-    );
+    // Attach dates and calculate totals
+    const formattedDays = days.map((day, index) => {
+      const date = new Date(startDate);
+      date.setDate(date.getDate() + index);
 
-    const days = [];
-    
-    // Generate meals for each day using OpenAI
-    for (let i = 0; i < 7; i++) {
-      const dayDate = new Date(startDate);
-      dayDate.setDate(dayDate.getDate() + i);
-      
-      try {
-        // Use OpenAI to generate meals for this day
-        const meals = await generateMealPlanWithAI(user, dailyCalorieTarget, dailyMacroTargets, i + 1);
-        
-        const totalCalories = meals.reduce((sum, meal) => sum + meal.calories, 0);
-        const totalMacros = meals.reduce((acc, meal) => ({
+      const totalCalories = day.meals.reduce((sum, meal) => sum + meal.calories, 0);
+      const totalMacros = day.meals.reduce(
+        (acc, meal) => ({
           carbs: acc.carbs + meal.macros.carbs,
           protein: acc.protein + meal.macros.protein,
           fat: acc.fat + meal.macros.fat
-        }), { carbs: 0, protein: 0, fat: 0 });
+        }),
+        { carbs: 0, protein: 0, fat: 0 }
+      );
 
-        days.push({
-          dayNumber: i + 1,
-          date: dayDate,
-          meals,
-          totalCalories,
-          totalMacros
-        });
-      } catch (error) {
-        console.error(`Error generating meals for day ${i + 1}:`, error);
-        // Fallback to default meals if OpenAI fails
-        const meals = getFallbackMeals(i, dailyCalorieTarget);
-        const totalCalories = meals.reduce((sum, meal) => sum + meal.calories, 0);
-        const totalMacros = meals.reduce((acc, meal) => ({
-          carbs: acc.carbs + meal.macros.carbs,
-          protein: acc.protein + meal.macros.protein,
-          fat: acc.fat + meal.macros.fat
-        }), { carbs: 0, protein: 0, fat: 0 });
-
-        days.push({
-          dayNumber: i + 1,
-          date: dayDate,
-          meals,
-          totalCalories,
-          totalMacros
-        });
-      }
-    }
+      return {
+        dayNumber: index + 1,
+        date,
+        meals: day.meals,
+        totalCalories,
+        totalMacros
+      };
+    });
 
     const mealPlan = new MealPlan({
       userId: req.userId,
@@ -148,26 +127,116 @@ export const generateMealPlan = async (req, res) => {
       endDate,
       dailyCalorieTarget,
       dailyMacroTargets,
-      days,
+      days: formattedDays,
       isActive: true
     });
 
     await mealPlan.save();
 
-    res.status(201).json({
-      success: true,
-      message: 'Meal plan generated successfully',
-      mealPlan
-    });
+    res.status(201).json({ success: true, message: 'Meal plan generated successfully', mealPlan });
   } catch (error) {
     console.error('Generate meal plan error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to generate meal plan',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to generate meal plan', error: error.message });
   }
 };
+// export const generateMealPlan = async (req, res) => {
+//   try {
+//     const user = await User.findById(req.userId);
+//     if (!user) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'User not found'
+//       });
+//     }
+
+//     // Calculate daily calorie target
+//     const dailyCalorieTarget = calculateCalorieTarget(user);
+//     const dailyMacroTargets = calculateMacroTargets(dailyCalorieTarget);
+
+//     // Generate 7-day meal plan
+//     const startDate = new Date();
+//     startDate.setHours(0, 0, 0, 0);
+//     const endDate = new Date(startDate);
+//     endDate.setDate(endDate.getDate() + 6);
+
+//     // Deactivate existing active plans
+//     await MealPlan.updateMany(
+//       { userId: req.userId, isActive: true },
+//       { isActive: false }
+//     );
+
+//     const days = [];
+    
+//     // Generate meals for each day using OpenAI
+//     for (let i = 0; i < 7; i++) {
+//       const dayDate = new Date(startDate);
+//       dayDate.setDate(dayDate.getDate() + i);
+      
+//       try {
+//         // Use OpenAI to generate meals for this day
+//         const meals = await generateMealPlanWithAI(user, dailyCalorieTarget, dailyMacroTargets, i + 1);
+        
+//         const totalCalories = meals.reduce((sum, meal) => sum + meal.calories, 0);
+//         const totalMacros = meals.reduce((acc, meal) => ({
+//           carbs: acc.carbs + meal.macros.carbs,
+//           protein: acc.protein + meal.macros.protein,
+//           fat: acc.fat + meal.macros.fat
+//         }), { carbs: 0, protein: 0, fat: 0 });
+
+//         days.push({
+//           dayNumber: i + 1,
+//           date: dayDate,
+//           meals,
+//           totalCalories,
+//           totalMacros
+//         });
+//       } catch (error) {
+//         console.error(`Error generating meals for day ${i + 1}:`, error);
+//         // Fallback to default meals if OpenAI fails
+//         const meals = getFallbackMeals(i, dailyCalorieTarget);
+//         const totalCalories = meals.reduce((sum, meal) => sum + meal.calories, 0);
+//         const totalMacros = meals.reduce((acc, meal) => ({
+//           carbs: acc.carbs + meal.macros.carbs,
+//           protein: acc.protein + meal.macros.protein,
+//           fat: acc.fat + meal.macros.fat
+//         }), { carbs: 0, protein: 0, fat: 0 });
+
+//         days.push({
+//           dayNumber: i + 1,
+//           date: dayDate,
+//           meals,
+//           totalCalories,
+//           totalMacros
+//         });
+//       }
+//     }
+
+//     const mealPlan = new MealPlan({
+//       userId: req.userId,
+//       startDate,
+//       endDate,
+//       dailyCalorieTarget,
+//       dailyMacroTargets,
+//       days,
+//       isActive: true
+//     });
+
+//     await mealPlan.save();
+
+//     res.status(201).json({
+//       success: true,
+//       message: 'Meal plan generated successfully',
+//       mealPlan
+//     });
+//   } catch (error) {
+//     console.error('Generate meal plan error:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to generate meal plan',
+//       error: error.message
+//     });
+//   }
+// };
 
 /**
  * Get current active meal plan
