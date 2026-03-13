@@ -28,8 +28,13 @@ export async function generateMealPlanDayWithAI(user, dailyCalorieTarget, dailyM
 
 User: ${dailyCalorieTarget}kcal/day, Carbs:${dailyMacroTargets.carbs}g Protein:${dailyMacroTargets.protein}g Fat:${dailyMacroTargets.fat}g. Conditions:${healthConditions}. Allergies:${allergies}. Diet:${vegetarian === 'Yes' ? 'Vegetarian' : ''}${vegan === 'Yes' ? 'Vegan' : ''}${glutenFree === 'Yes' ? 'Gluten-Free' : ''}${dairyFree === 'Yes' ? 'Dairy-Free' : ''}
 
+For each meal, provide a detailed "description" field (2-3 sentences) explaining:
+- What makes this meal nutritious and beneficial
+- Key health advantages (e.g., "Rich in omega-3s for heart health", "High fiber for digestive wellness", "Protein-packed for muscle recovery")
+- How it supports the user's dietary goals and health conditions
+
 Return JSON only:
-{"meals":[{"mealType":"Breakfast","name":"...","description":"...","calories":0,"macros":{"carbs":0,"protein":0,"fat":0},"tags":["..."],"ingredients":["..."]},{"mealType":"Lunch",...},{"mealType":"Dinner",...},{"mealType":"Snack",...}]}`;
+{"meals":[{"mealType":"Breakfast","name":"...","description":"Detailed 2-3 sentence description with health advantages and benefits...","calories":0,"macros":{"carbs":0,"protein":0,"fat":0},"tags":["..."],"ingredients":["..."]},{"mealType":"Lunch",...},{"mealType":"Dinner",...},{"mealType":"Snack",...}]}`;
 
     const responsePromise = openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -38,7 +43,7 @@ Return JSON only:
         { role: 'user', content: prompt }
       ],
       temperature: 0.8,
-      max_tokens: 1200 // Reduced for faster response
+      max_tokens: 1800 // Increased to accommodate detailed descriptions
     });
 
     // Add timeout
@@ -107,8 +112,13 @@ export async function generateMealPlanWithAI(user, dailyCalorieTarget, dailyMacr
 
 User: ${dailyCalorieTarget}kcal/day, Carbs:${dailyMacroTargets.carbs}g Protein:${dailyMacroTargets.protein}g Fat:${dailyMacroTargets.fat}g. Conditions:${healthConditions}. Allergies:${allergies}. Diet:${vegetarian === 'Yes' ? 'Vegetarian' : ''}${vegan === 'Yes' ? 'Vegan' : ''}${glutenFree === 'Yes' ? 'Gluten-Free' : ''}${dairyFree === 'Yes' ? 'Dairy-Free' : ''}
 
+For each meal, provide a detailed "description" field (2-3 sentences) explaining:
+- What makes this meal nutritious and beneficial
+- Key health advantages (e.g., "Rich in omega-3s for heart health", "High fiber for digestive wellness", "Protein-packed for muscle recovery")
+- How it supports the user's dietary goals and health conditions
+
 Return JSON only:
-{"days":[{"meals":[{"mealType":"Breakfast","name":"...","description":"...","calories":0,"macros":{"carbs":0,"protein":0,"fat":0},"tags":["..."],"ingredients":["..."]},...]},...]}`;
+{"days":[{"meals":[{"mealType":"Breakfast","name":"...","description":"Detailed 2-3 sentence description with health advantages and benefits...","calories":0,"macros":{"carbs":0,"protein":0,"fat":0},"tags":["..."],"ingredients":["..."]},...]},...]}`;
 
     const responsePromise = openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -117,7 +127,7 @@ Return JSON only:
         { role: 'user', content: prompt }
       ],
       temperature: 0.8,
-      max_tokens: 4000
+      max_tokens: 5000 // Increased to accommodate detailed descriptions for all 7 days
     });
 
     // Add timeout
