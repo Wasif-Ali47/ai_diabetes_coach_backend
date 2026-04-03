@@ -2,7 +2,8 @@ import Reminder from '../models/Reminder.js';
 import { validationResult } from 'express-validator';
 
 /**
- * Create reminder
+ * Create reminder (stored per authenticated user).
+ * Actual delivery at [time] is performed on each device via scheduled local notifications in the app.
  */
 export const createReminder = async (req, res) => {
   try {
