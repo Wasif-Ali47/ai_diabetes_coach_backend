@@ -2,6 +2,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { startReminderPushScheduler } from './services/reminderPushScheduler.js';
 
 // Load environment variables
 dotenv.config();
@@ -125,6 +126,7 @@ const PORT = process.env.PORT || 5027;
 mongoose.connect(MONGODB_URI)
   .then(() => {
     console.log('✅ Connected to MongoDB');
+    startReminderPushScheduler();
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📡 API available at http://localhost:${PORT}/api`);

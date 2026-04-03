@@ -85,10 +85,15 @@ export const getWeightProgress = async (req, res) => {
  */
 export const getProgressDashboard = async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
-    const start = startDate ? new Date(startDate) : new Date();
-    start.setDate(start.getDate() - 7); // Default 7 days
+    const { startDate, endDate, granularity } = req.query;
+    let start;
     const end = endDate ? new Date(endDate) : new Date();
+    if (startDate) {
+      start = new Date(startDate);
+    } else {
+      start = new Date();
+      start.setDate(start.getDate() - 7);
+    }
 
     // Get user's meal plan for targets
     const mealPlan = await MealPlan.findOne({
@@ -190,13 +195,76 @@ export const getProgressDashboard = async (req, res) => {
       };
     });
 
+    let resultSummaries = summaries;
+    if (granularity === 'monthly') {
+      const monthMap = {};
+      for (const s of summaries) {
+        const ym = s.date.substring(0, 7);
+        if (!monthMap[ym]) {
+          monthMap[ym] = {
+            date: `${ym}-01`,
+            caloriesConsumed: 0,
+            caloriesBurned: 0,
+            carbs: 0,
+            protein: 0,
+            fat: 0,
+            fibre: 0,
+            symptoms: {},
+            adherenceSum: 0,
+            macroCarbsSum: 0,
+            macroProteinSum: 0,
+            macroFatSum: 0,
+            dayCount: 0
+          };
+        }
+        const m = monthMap[ym];
+        m.caloriesConsumed += s.caloriesConsumed || 0;
+        m.caloriesBurned += s.caloriesBurned || 0;
+        m.carbs += s.carbs || 0;
+        m.protein += s.protein || 0;
+        m.fat += s.fat || 0;
+        m.fibre += s.fibre || 0;
+        m.adherenceSum += s.calorieAdherence || 0;
+        m.macroCarbsSum += s.macroBalance?.carbs || 0;
+        m.macroProteinSum += s.macroBalance?.protein || 0;
+        m.macroFatSum += s.macroBalance?.fat || 0;
+        m.dayCount += 1;
+        for (const [symptomType, ratings] of Object.entries(s.symptoms || {})) {
+          if (!m.symptoms[symptomType]) m.symptoms[symptomType] = [];
+          m.symptoms[symptomType].push(...ratings);
+        }
+      }
+      resultSummaries = Object.keys(monthMap).sort().map((ym) => {
+        const m = monthMap[ym];
+        const netCalories = m.caloriesConsumed - m.caloriesBurned;
+        const dc = m.dayCount || 1;
+        return {
+          date: m.date,
+          caloriesConsumed: m.caloriesConsumed,
+          caloriesBurned: m.caloriesBurned,
+          netCalories,
+          carbs: m.carbs,
+          protein: m.protein,
+          fat: m.fat,
+          fibre: m.fibre,
+          symptoms: m.symptoms,
+          calorieAdherence: Math.round(m.adherenceSum / dc),
+          macroBalance: {
+            carbs: Math.round(m.macroCarbsSum / dc),
+            protein: Math.round(m.macroProteinSum / dc),
+            fat: Math.round(m.macroFatSum / dc)
+          }
+        };
+      });
+    }
+
     res.json({
       success: true,
       startDate: start.toISOString(),
       endDate: end.toISOString(),
       dailyCalorieTarget,
       dailyMacroTargets,
-      summaries
+      summaries: resultSummaries
     });
   } catch (error) {
     console.error('[getProgressDashboard] Error:', error);

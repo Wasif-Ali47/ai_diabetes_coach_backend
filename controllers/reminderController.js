@@ -3,7 +3,7 @@ import { validationResult } from 'express-validator';
 
 /**
  * Create reminder (stored per authenticated user).
- * Actual delivery at [time] is performed on each device via scheduled local notifications in the app.
+ * Delivery at [time] is via FCM push (see reminderPushScheduler) using [timezone].
  */
 export const createReminder = async (req, res) => {
   try {
@@ -16,7 +16,7 @@ export const createReminder = async (req, res) => {
       });
     }
 
-    const { title, type, time, enabled = true, daysOfWeek, frequency = 'daily', medication } = req.body;
+    const { title, type, time, enabled = true, daysOfWeek, frequency = 'daily', medication, timezone } = req.body;
 
     // Calculate daysOfWeek based on frequency if not provided
     let calculatedDaysOfWeek = daysOfWeek;
@@ -50,7 +50,8 @@ export const createReminder = async (req, res) => {
       enabled,
       frequency,
       daysOfWeek: calculatedDaysOfWeek,
-      medication
+      medication,
+      timezone: typeof timezone === 'string' && timezone.trim() ? timezone.trim() : 'UTC'
     });
 
     await reminder.save();
