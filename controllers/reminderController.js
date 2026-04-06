@@ -56,6 +56,15 @@ export const createReminder = async (req, res) => {
 
     await reminder.save();
 
+    console.log('[reminderPush] reminder created (server will fire at local time via scheduler)', {
+      reminderId: String(reminder._id),
+      userId: String(req.userId),
+      time: reminder.time,
+      timezone: reminder.timezone,
+      frequency: reminder.frequency,
+      enabled: reminder.enabled,
+    });
+
     res.status(201).json({
       success: true,
       message: 'Reminder created successfully',
@@ -151,6 +160,15 @@ export const updateReminder = async (req, res) => {
         message: 'Reminder not found'
       });
     }
+
+    console.log('[reminderPush] reminder updated', {
+      reminderId: String(reminder._id),
+      userId: String(req.userId),
+      time: reminder.time,
+      timezone: reminder.timezone,
+      frequency: reminder.frequency,
+      enabled: reminder.enabled,
+    });
 
     res.json({
       success: true,

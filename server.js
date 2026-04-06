@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { startReminderPushScheduler } from './services/reminderPushScheduler.js';
+import { ensureFirebaseAdmin } from './utils/firebaseAdminInit.js';
 
 // Load environment variables
 dotenv.config();
@@ -126,6 +127,8 @@ const PORT = process.env.PORT || 5027;
 mongoose.connect(MONGODB_URI)
   .then(() => {
     console.log('✅ Connected to MongoDB');
+    const fb = ensureFirebaseAdmin();
+    console.log('[reminderPush] Firebase Admin at startup:', fb ? 'ready (FCM can send)' : 'missing credentials (reminder pushes will not send)');
     startReminderPushScheduler();
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);

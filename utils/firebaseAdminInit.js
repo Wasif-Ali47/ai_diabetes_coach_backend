@@ -37,6 +37,9 @@ export function ensureFirebaseAdmin() {
   }
 
   if (!serviceAccount) {
+    console.warn(
+      '[firebaseAdminInit] No credentials: set FIREBASE_SERVICE_ACCOUNT or place firebase-service-account.json — FCM (reminders) disabled'
+    );
     return null;
   }
 
@@ -44,6 +47,8 @@ export function ensureFirebaseAdmin() {
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
     });
+    const pid = serviceAccount.project_id || serviceAccount.projectId || '(unknown)';
+    console.log('[firebaseAdminInit] Firebase Admin initialized for FCM, project_id:', pid);
   }
   initialized = true;
   return admin;
