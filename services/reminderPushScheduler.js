@@ -132,6 +132,108 @@ async function sendReminderPush(reminder, user) {
 
 let intervalId = null;
 
+async function runReminderPushTick() {
+  try {
+    const reminders = await Reminder.find({ enabled: true });
+    const utcIso = new Date().toISOString();
+    if (REMINDER_PUSH_TICK_LOG || REMINDER_PUSH_DEBUG) {
+      console.log('[reminderPush] tick', {
+        enabledReminderCount: reminders.length,
+        utcIso,
+      });
+    }
+
+    let fired = 0;
+    const userCache = new Map();
+
+    for (const reminder of reminders) {
+      const tz = reminder.timezone || 'UTC';
+      let local;
+      let usedFallback = false;
+      try {
+        local = DateTime.now().setZone(tz);
+        if (!local.isValid) {
+          usedFallback = true;
+          local = DateTime.now().setZone('UTC');
+        }
+      } catch {
+        usedFallback = true;
+        local = DateTime.now().setZone('UTC');
+      }
+      if (usedFallback) {
+        console.warn('[reminderPush] invalid timezone, using UTC', {
+          reminderId: String(reminder._id),
+          storedTimezone: tz,
+        });
+      }
+
+      const fire = shouldFireNow(reminder, local);
+      if (REMINDER_PUSH_DEBUG) {
+        const modelDow = toModelDayOfWeek(local.weekday);
+        console.log('[reminderPush] evaluate', {
+          reminderId: String(reminder._id),
+          userId: String(reminder.userId),
+          tz,
+          localWall: local.toFormat('yyyy-MM-dd HH:mm:ss ZZZZ'),
+          localHour: local.hour,
+          localMinute: local.minute,
+          reminderTime: reminder.time,
+          frequency: reminder.frequency,
+          modelDow,
+          daysOfWeek: reminder.daysOfWeek,
+          dayMatches: dayMatchesFrequency(reminder, modelDow),
+          shouldFireNow: fire,
+        });
+      }
+
+      if (!fire) continue;
+
+      if (reminder.lastTriggered) {
+        const ms = Date.now() - new Date(reminder.lastTriggered).getTime();
+        if (ms < 50000) {
+          if (REMINDER_PUSH_DEBUG) {
+            console.log('[reminderPush] skip cooldown (~50s)', {
+              reminderId: String(reminder._id),
+              msSinceLastTriggered: ms,
+            });
+          }
+          continue;
+        }
+      }
+
+      let user = userCache.get(String(reminder.userId));
+      if (!user) {
+        user = await User.findById(reminder.userId).select('deviceTokens');
+        if (!user) {
+          console.warn('[reminderPush] user missing for reminder; skip', {
+            reminderId: String(reminder._id),
+            userId: String(reminder.userId),
+          });
+          continue;
+        }
+        userCache.set(String(reminder.userId), user);
+      }
+
+      console.log('[reminderPush] firing', {
+        reminderId: String(reminder._id),
+        userId: String(user._id),
+        title: reminder.title,
+        type: reminder.type,
+        tz,
+        localWall: local.toFormat('yyyy-MM-dd HH:mm'),
+      });
+      await sendReminderPush(reminder, user);
+      fired += 1;
+    }
+
+    if (fired > 0) {
+      console.log('[reminderPush] tick done', { fired, checked: reminders.length });
+    }
+  } catch (e) {
+    console.error('[reminderPush] tick error:', e?.message, e?.stack);
+  }
+}
+
 export function startReminderPushScheduler() {
   if (intervalId) return;
 
@@ -141,107 +243,11 @@ export function startReminderPushScheduler() {
     fcmReady: messagingOk,
     verboseDebug: REMINDER_PUSH_DEBUG,
     tickLogEachMinute: REMINDER_PUSH_TICK_LOG || REMINDER_PUSH_DEBUG,
+    immediateFirstTick: true,
   });
 
-  intervalId = setInterval(async () => {
-    try {
-      const reminders = await Reminder.find({ enabled: true });
-      const utcIso = new Date().toISOString();
-      if (REMINDER_PUSH_TICK_LOG || REMINDER_PUSH_DEBUG) {
-        console.log('[reminderPush] tick', {
-          enabledReminderCount: reminders.length,
-          utcIso,
-        });
-      }
-
-      let fired = 0;
-      const userCache = new Map();
-
-      for (const reminder of reminders) {
-        const tz = reminder.timezone || 'UTC';
-        let local;
-        let usedFallback = false;
-        try {
-          local = DateTime.now().setZone(tz);
-          if (!local.isValid) {
-            usedFallback = true;
-            local = DateTime.now().setZone('UTC');
-          }
-        } catch {
-          usedFallback = true;
-          local = DateTime.now().setZone('UTC');
-        }
-        if (usedFallback) {
-          console.warn('[reminderPush] invalid timezone, using UTC', {
-            reminderId: String(reminder._id),
-            storedTimezone: tz,
-          });
-        }
-
-        const fire = shouldFireNow(reminder, local);
-        if (REMINDER_PUSH_DEBUG) {
-          const modelDow = toModelDayOfWeek(local.weekday);
-          console.log('[reminderPush] evaluate', {
-            reminderId: String(reminder._id),
-            userId: String(reminder.userId),
-            tz,
-            localWall: local.toFormat('yyyy-MM-dd HH:mm:ss ZZZZ'),
-            localHour: local.hour,
-            localMinute: local.minute,
-            reminderTime: reminder.time,
-            frequency: reminder.frequency,
-            modelDow,
-            daysOfWeek: reminder.daysOfWeek,
-            dayMatches: dayMatchesFrequency(reminder, modelDow),
-            shouldFireNow: fire,
-          });
-        }
-
-        if (!fire) continue;
-
-        if (reminder.lastTriggered) {
-          const ms = Date.now() - new Date(reminder.lastTriggered).getTime();
-          if (ms < 50000) {
-            if (REMINDER_PUSH_DEBUG) {
-              console.log('[reminderPush] skip cooldown (~50s)', {
-                reminderId: String(reminder._id),
-                msSinceLastTriggered: ms,
-              });
-            }
-            continue;
-          }
-        }
-
-        let user = userCache.get(String(reminder.userId));
-        if (!user) {
-          user = await User.findById(reminder.userId).select('deviceTokens');
-          if (!user) {
-            console.warn('[reminderPush] user missing for reminder; skip', {
-              reminderId: String(reminder._id),
-              userId: String(reminder.userId),
-            });
-            continue;
-          }
-          userCache.set(String(reminder.userId), user);
-        }
-
-        console.log('[reminderPush] firing', {
-          reminderId: String(reminder._id),
-          userId: String(user._id),
-          title: reminder.title,
-          type: reminder.type,
-          tz,
-          localWall: local.toFormat('yyyy-MM-dd HH:mm'),
-        });
-        await sendReminderPush(reminder, user);
-        fired += 1;
-      }
-
-      if (fired > 0) {
-        console.log('[reminderPush] tick done', { fired, checked: reminders.length });
-      }
-    } catch (e) {
-      console.error('[reminderPush] tick error:', e?.message, e?.stack);
-    }
+  void runReminderPushTick();
+  intervalId = setInterval(() => {
+    void runReminderPushTick();
   }, TICK_MS);
 }

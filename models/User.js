@@ -47,7 +47,8 @@ const userSchema = new mongoose.Schema({
   }],
   medications: [{
     name: String,
-    dosage: String
+    dosage: String,
+    timing: String // e.g. "08:00, 20:00" or "Before breakfast, After dinner"
   }],
   // Diet preferences
   dietPreferences: {
@@ -58,11 +59,88 @@ const userSchema = new mongoose.Schema({
     allergies: [String],
     preferences: [String]
   },
+  // ===== Diabetes-specific profile =====
+  // Primary status: which group does the user fall under
+  diabetesType: {
+    type: String,
+    enum: [
+      'Type 1',
+      'Type 2',
+      'Pre-diabetes',
+      'Insulin Resistance',
+      'Gestational',
+      'Obesity (At Risk)',
+      'Family History (At Risk)',
+      'Not Sure'
+    ]
+  },
+  // Latest fasting blood sugar in mg/dL
+  fastingSugar: { type: Number },
+  // Latest HbA1c % value
+  hba1c: { type: Number },
+  // Food likes / dislikes (free-form list)
+  foodLikes: [{ type: String }],
+  foodDislikes: [{ type: String }],
+  // Local foods the user commonly eats (roti, rice, daal, salan, qeema, biryani, fruits, etc.)
+  localFoodPreferences: [{ type: String }],
+  // Budget tier and cooking time preference
+  budget: {
+    type: String,
+    enum: ['Low', 'Medium', 'High', 'Flexible']
+  },
+  cookingTime: {
+    type: String,
+    enum: ['Quick (<20 min)', 'Moderate (20-40 min)', 'Relaxed (40+ min)']
+  },
   // Subscription
   subscriptionPlan: {
     type: String,
     enum: ['Free', 'Premium'],
     default: 'Free'
+  },
+  // Cross-device entitlement source of truth for Care AI chat.
+  isPro: {
+    type: Boolean,
+    default: false
+  },
+  subscription: {
+    platform: {
+      type: String,
+      enum: ['android', 'ios', 'web', 'none'],
+      default: 'none'
+    },
+    productId: {
+      type: String,
+      trim: true
+    },
+    purchaseToken: {
+      type: String,
+      trim: true
+    },
+    originalTransactionId: {
+      type: String,
+      trim: true
+    },
+    status: {
+      type: String,
+      enum: ['inactive', 'active', 'expired', 'cancelled', 'verify_failed', 'unsupported'],
+      default: 'inactive'
+    },
+    expiresAt: Date,
+    lastVerifiedAt: Date,
+    source: {
+      type: String,
+      default: 'none'
+    }
+  },
+  // Care AI free-tier usage; does not reset on chat clear.
+  careUsage: {
+    totalMessagesUsed: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    updatedAt: Date
   },
   // Device tokens for push notifications
   deviceTokens: [{

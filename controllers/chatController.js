@@ -1,7 +1,67 @@
 import ChatMessage from '../models/ChatMessage.js';
 import User from '../models/User.js';
 import { generateChatResponse } from '../services/openaiService.js';
+import { verifyIapPurchase } from '../services/iapVerificationService.js';
 import { validationResult } from 'express-validator';
+
+const FREE_CHAT_LIMIT = Number(process.env.CARE_FREE_CHAT_LIMIT || 5);
+
+function computeUserIsPro(user) {
+  if (user?.isPro) return true;
+  return user?.subscriptionPlan === 'Premium';
+}
+
+async function ensureUsageCounter(user) {
+  const stored = Number(user?.careUsage?.totalMessagesUsed || 0);
+  const counted = await ChatMessage.countDocuments({ userId: user._id, isUser: true });
+  if (counted > stored) {
+    user.careUsage = {
+      totalMessagesUsed: counted,
+      updatedAt: new Date(),
+    };
+    await user.save();
+    return counted;
+  }
+  return stored;
+}
+
+async function buildEntitlement(user) {
+  const totalUsed = await ensureUsageCounter(user);
+
+  // Downgrade automatically if expiry passed.
+  if (
+    computeUserIsPro(user) &&
+    user?.subscription?.expiresAt &&
+    new Date(user.subscription.expiresAt).getTime() <= Date.now()
+  ) {
+    user.isPro = false;
+    user.subscriptionPlan = 'Free';
+    user.subscription = {
+      ...(user.subscription || {}),
+      status: 'expired',
+    };
+    await user.save();
+  }
+
+  const isPro = computeUserIsPro(user);
+  const remaining = isPro ? null : Math.max(0, FREE_CHAT_LIMIT - totalUsed);
+  return {
+    isPro,
+    freeLimit: FREE_CHAT_LIMIT,
+    used: totalUsed,
+    remaining,
+    hardLocked: !isPro && totalUsed >= FREE_CHAT_LIMIT,
+    subscription: {
+      plan: user.subscriptionPlan || (isPro ? 'Premium' : 'Free'),
+      status: user?.subscription?.status || (isPro ? 'active' : 'inactive'),
+      productId: user?.subscription?.productId || null,
+      platform: user?.subscription?.platform || 'none',
+      expiresAt: user?.subscription?.expiresAt || null,
+      lastVerifiedAt: user?.subscription?.lastVerifiedAt || null,
+      source: user?.subscription?.source || 'none',
+    },
+  };
+}
 
 /**
  * Send message and get AI response
@@ -27,6 +87,16 @@ export const sendMessage = async (req, res) => {
       });
     }
 
+    const entitlement = await buildEntitlement(user);
+    if (entitlement.hardLocked) {
+      return res.status(402).json({
+        success: false,
+        code: 'CHAT_LIMIT_REACHED',
+        message: 'Free AI chat limit reached. Upgrade to continue.',
+        entitlement,
+      });
+    }
+
     // Get recent chat history for context
     const recentMessages = await ChatMessage.find({ userId: req.userId })
       .sort({ createdAt: -1 })
@@ -41,6 +111,12 @@ export const sendMessage = async (req, res) => {
       isUser: true
     });
     await userMessage.save();
+    user.careUsage = {
+      totalMessagesUsed: Number(user?.careUsage?.totalMessagesUsed || 0) + 1,
+      updatedAt: new Date(),
+    };
+    await user.save();
+    const updatedEntitlement = await buildEntitlement(user);
 
     try {
       // Generate AI response using OpenAI
@@ -62,6 +138,7 @@ export const sendMessage = async (req, res) => {
 
       res.json({
         success: true,
+        entitlement: updatedEntitlement,
         userMessage: {
           id: userMessage._id,
           message: userMessage.message,
@@ -94,6 +171,7 @@ export const sendMessage = async (req, res) => {
 
       res.json({
         success: true,
+        entitlement: updatedEntitlement,
         userMessage: {
           id: userMessage._id,
           message: userMessage.message,
@@ -126,6 +204,13 @@ export const sendMessage = async (req, res) => {
 export const getChatHistory = async (req, res) => {
   try {
     const { limit = 50 } = req.query;
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
 
     const messages = await ChatMessage.find({ userId: req.userId })
       .sort({ createdAt: -1 })
@@ -137,6 +222,7 @@ export const getChatHistory = async (req, res) => {
     res.json({
       success: true,
       count: messages.length,
+      entitlement: await buildEntitlement(user),
       messages
     });
   } catch (error) {
@@ -171,6 +257,109 @@ export const clearChatHistory = async (req, res) => {
 };
 
 /**
+ * Get entitlement status for Care AI chat.
+ */
+export const getCareEntitlement = async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    res.json({
+      success: true,
+      entitlement: await buildEntitlement(user),
+    });
+  } catch (error) {
+    console.error('Get care entitlement error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch entitlement',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Verify in-app purchase and persist premium entitlement on user.
+ */
+export const verifyCarePurchase = async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: errors.array(),
+      });
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    const {
+      platform = 'android',
+      productId,
+      purchaseToken,
+      packageName,
+      transactionId,
+    } = req.body;
+
+    const verification = await verifyIapPurchase({
+      platform,
+      productId,
+      purchaseToken,
+      packageName,
+    });
+
+    if (!verification.ok) {
+      return res.status(400).json({
+        success: false,
+        message: 'Purchase verification failed',
+        verification,
+        entitlement: await buildEntitlement(user),
+      });
+    }
+
+    user.isPro = true;
+    user.subscriptionPlan = 'Premium';
+    user.subscription = {
+      platform,
+      productId,
+      purchaseToken,
+      originalTransactionId: transactionId || null,
+      status: verification.status || 'active',
+      expiresAt: verification.expiresAt ? new Date(verification.expiresAt) : null,
+      source: verification.source || 'unknown',
+      lastVerifiedAt: new Date(),
+    };
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Purchase verified and premium unlocked',
+      verification,
+      entitlement: await buildEntitlement(user),
+    });
+  } catch (error) {
+    console.error('Verify purchase error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to verify purchase',
+      error: error.message,
+    });
+  }
+};
+
+/**
  * Fallback response if OpenAI fails
  */
 function getFallbackResponse(userMessage, user) {
@@ -179,31 +368,30 @@ function getFallbackResponse(userMessage, user) {
   let confidence = 0.75;
   let type = 'default';
 
-  if (lowerMessage.includes('blood sugar') || lowerMessage.includes('glucose') || lowerMessage.includes('diabetes')) {
-    response = 'For managing blood sugar, focus on low-GI foods like whole grains, legumes, and non-starchy vegetables. Consider spacing meals evenly throughout the day and monitoring your levels regularly.';
-    confidence = 0.88;
+  if (lowerMessage.includes('sugar') || lowerMessage.includes('glucose') || lowerMessage.includes('hba1c') || lowerMessage.includes('diabetes')) {
+    response = 'For steady blood sugar, prioritise low-GI foods (whole-wheat roti, daal, brown rice in small portions, non-starchy vegetables), pair carbs with protein, and walk 10-15 minutes after meals.';
+    confidence = 0.90;
     type = 'blood_sugar';
-  } else if (lowerMessage.includes('meal') || lowerMessage.includes('plan') || lowerMessage.includes('food') || lowerMessage.includes('diet')) {
-    response = 'Your meal plan is personalized based on your health conditions and preferences. Check your "My Plan" section for detailed meal recommendations.';
+  } else if (lowerMessage.includes('eat') || lowerMessage.includes('can i have') || lowerMessage.includes('meal') || lowerMessage.includes('food') || lowerMessage.includes('roti') || lowerMessage.includes('rice') || lowerMessage.includes('biryani') || lowerMessage.includes('fruit')) {
+    response = 'Keep the portion small (e.g. 1 roti, ½ cup rice, 1 small fruit) and pair it with protein or fibre. Check your personalised plan in the My Plan tab for safe portion sizes.';
     confidence = 0.92;
     type = 'meal_plan';
-  } else if (lowerMessage.includes('medication') || lowerMessage.includes('medicine') || lowerMessage.includes('pill')) {
-    response = 'It\'s important to take medications as prescribed. Some medications may interact with certain foods - always consult your doctor about dietary restrictions.';
+  } else if (lowerMessage.includes('medication') || lowerMessage.includes('medicine') || lowerMessage.includes('insulin') || lowerMessage.includes('metformin') || lowerMessage.includes('pill')) {
+    response = 'Take diabetic medication exactly as prescribed and time it around meals. Never change the dose without talking to your doctor.';
     confidence = 0.85;
     type = 'medication';
-  } else if (lowerMessage.includes('symptom') || lowerMessage.includes('track') || lowerMessage.includes('log')) {
-    response = 'Tracking symptoms helps identify patterns. Log your symptoms regularly and share trends with your healthcare provider for better management.';
-    confidence = 0.90;
+  } else if (lowerMessage.includes('symptom') || lowerMessage.includes('dizzy') || lowerMessage.includes('tired') || lowerMessage.includes('thirsty')) {
+    response = 'Frequent thirst, fatigue or dizziness can signal that sugar is too high or too low. Log a reading now and contact your doctor if symptoms persist.';
+    confidence = 0.88;
     type = 'symptoms';
   } else {
-    response = 'I understand you\'re asking about nutrition and health. For personalized advice, I recommend consulting with your healthcare provider. I can help with general information about meal planning, tracking, and reminders.';
+    response = 'I can help with daily diabetic meals, sugar-safe portions, food swaps and "Can I eat this?" questions. For medical decisions, please consult your doctor.';
     confidence = 0.75;
     type = 'default';
   }
 
-  if (user.healthConditions && user.healthConditions.length > 0) {
-    const conditions = user.healthConditions.join(', ');
-    response += ` Based on your conditions (${conditions}), make sure to follow your personalized plan.`;
+  if (user.diabetesType) {
+    response += ` (Tailored for ${user.diabetesType}.)`;
   }
 
   return { text: response, confidence, type };

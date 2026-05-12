@@ -40,12 +40,11 @@ export const exportUserData = async (req, res) => {
     doc.on('end', () => {
       const pdfData = Buffer.concat(buffers);
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="nutriguide-data-${user.email}-${Date.now()}.pdf"`);
+      res.setHeader('Content-Disposition', `attachment; filename="diabetic-coach-data-${user.email}-${Date.now()}.pdf"`);
       res.send(pdfData);
     });
 
-    // Header
-    doc.fontSize(24).text('NutriGuide Data Export', { align: 'center' });
+    doc.fontSize(24).text('Diabetic Diet AI Coach – Data Export', { align: 'center' });
     doc.moveDown();
     doc.fontSize(10).text(`Generated: ${new Date().toLocaleString()}`, { align: 'center' });
     doc.moveDown(2);
@@ -71,16 +70,46 @@ export const exportUserData = async (req, res) => {
       doc.text(` ${value}`, { continued: false });
     });
 
+    doc.moveDown(1);
+    doc.fontSize(14).text('Diabetes Profile', { underline: true });
+    doc.moveDown(0.3);
+    doc.fontSize(11);
+    const diabetesData = [
+      ['Diabetes Type', user.diabetesType || 'Not provided'],
+      ['Fasting Sugar (mg/dL)', user.fastingSugar != null ? `${user.fastingSugar}` : 'Not provided'],
+      ['HbA1c (%)', user.hba1c != null ? `${user.hba1c}` : 'Not provided'],
+      ['Budget', user.budget || 'Not provided'],
+      ['Cooking Time', user.cookingTime || 'Not provided'],
+    ];
+    diabetesData.forEach(([label, value]) => {
+      doc.text(`${label}:`, { continued: true }).font('Helvetica-Bold');
+      doc.text(` ${value}`, { continued: false });
+    });
+
+    if (user.localFoodPreferences && user.localFoodPreferences.length > 0) {
+      doc.moveDown(0.3);
+      doc.text('Local foods:', { continued: true }).font('Helvetica-Bold');
+      doc.text(` ${user.localFoodPreferences.join(', ')}`);
+    }
+    if (user.foodLikes && user.foodLikes.length > 0) {
+      doc.text('Food likes:', { continued: true }).font('Helvetica-Bold');
+      doc.text(` ${user.foodLikes.join(', ')}`);
+    }
+    if (user.foodDislikes && user.foodDislikes.length > 0) {
+      doc.text('Food dislikes:', { continued: true }).font('Helvetica-Bold');
+      doc.text(` ${user.foodDislikes.join(', ')}`);
+    }
+
     if (user.healthConditions && user.healthConditions.length > 0) {
       doc.moveDown(0.5);
-      doc.text('Health Conditions:', { continued: true }).font('Helvetica-Bold');
+      doc.text('Other Health Conditions:', { continued: true }).font('Helvetica-Bold');
       doc.text(` ${user.healthConditions.join(', ')}`);
     }
 
     if (user.medications && user.medications.length > 0) {
       doc.moveDown(0.5);
       doc.text('Medications:', { continued: true }).font('Helvetica-Bold');
-      doc.text(` ${user.medications.map(m => `${m.name} ${m.dosage || ''}`).join(', ')}`);
+      doc.text(` ${user.medications.map(m => `${m.name}${m.dosage ? ' ' + m.dosage : ''}${m.timing ? ' @ ' + m.timing : ''}`).join(', ')}`);
     }
 
     doc.moveDown(2);

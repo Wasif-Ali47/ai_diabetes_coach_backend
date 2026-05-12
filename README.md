@@ -1,6 +1,8 @@
-# NutriGuide Backend API
+# Diabetic Diet AI Coach – Backend API
 
-Backend server for the NutriGuide Flutter application built with Node.js, Express, and MongoDB.
+Backend server for the Diabetic Diet AI Coach Flutter application built with Node.js, Express, and MongoDB.
+
+The API powers a diabetes-focused nutrition coach for people with Type 1 / Type 2 diabetes, pre-diabetes, insulin resistance, obesity and family history of diabetes — generating low-GI meal plans, sugar-safe food swaps, a "Can I eat this?" food checker, weekly grocery lists and reminders.
 
 ## Features
 

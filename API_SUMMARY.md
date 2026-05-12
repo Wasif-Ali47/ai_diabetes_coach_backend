@@ -1,7 +1,7 @@
-# NutriGuide Backend API Summary
+# Diabetic Diet AI Coach – Backend API Summary
 
 ## Overview
-Complete Node.js backend API for the NutriGuide Flutter application with all features implemented.
+Complete Node.js backend API for the Diabetic Diet AI Coach Flutter application with all features implemented.
 
 ## Features Implemented
 

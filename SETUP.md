@@ -55,7 +55,7 @@ You should see:
 ```json
 {
   "status": "OK",
-  "message": "NutriGuide API is running",
+  "message": "Diabetic Diet AI Coach API is running",
   "timestamp": "..."
 }
 ```

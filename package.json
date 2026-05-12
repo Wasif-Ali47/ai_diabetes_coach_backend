@@ -1,7 +1,7 @@
 {
-  "name": "nutriguide-backend",
+  "name": "diabetic-diet-ai-coach-backend",
   "version": "1.0.0",
-  "description": "Backend API for NutriGuide Flutter App",
+  "description": "Backend API for Diabetic Diet AI Coach Flutter App",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -10,6 +10,8 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
+    "diabetes",
+    "diabetic-diet",
     "nutrition",
     "health",
     "api",

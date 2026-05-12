@@ -1,6 +1,12 @@
 import MealPlan from '../models/MealPlan.js';
 import User from '../models/User.js';
-import { generateMealPlanWithAI, generateMealPlanDayWithAI } from '../services/openaiService.js';
+import {
+  generateMealPlanWithAI,
+  generateMealPlanDayWithAI,
+  checkFoodSafetyWithAI,
+  generateFoodSwapsWithAI,
+  generateGroceryListWithAI
+} from '../services/openaiService.js';
 
 /**
  * Calculate daily calorie target
@@ -57,13 +63,15 @@ function calculateCalorieTarget(user) {
 }
 
 /**
- * Calculate macro targets
+ * Calculate macro targets for a diabetic user.
+ * Diabetic guideline: carbs are LOWERED (≈ 35 %) and replaced with protein
+ * and healthy fats to flatten the glucose curve.
  */
 function calculateMacroTargets(calories) {
   return {
-    carbs: Math.round((calories * 0.40) / 4),
+    carbs: Math.round((calories * 0.35) / 4),
     protein: Math.round((calories * 0.30) / 4),
-    fat: Math.round((calories * 0.30) / 9)
+    fat: Math.round((calories * 0.35) / 9)
   };
 }
 
@@ -156,6 +164,13 @@ export const generateMealPlan = async (req, res) => {
         console.warn(`[generateMealPlan] Day ${i + 1} meals invalid, using fallback`);
         meals = getFallbackMeals(i, dailyCalorieTarget);
       }
+
+      // Normalise diabetes-specific fields so they are always saved.
+      meals = meals.map((m) => ({
+        ...m,
+        portionGuide: m.portionGuide || '',
+        sugarImpact: m.sugarImpact || 'Low',
+      }));
 
       const totalCalories = meals.reduce((sum, meal) => sum + (meal.calories || 0), 0);
       const totalMacros = meals.reduce(
@@ -448,7 +463,9 @@ export const updateMealPlanDay = async (req, res) => {
 };
 
 /**
- * Fallback meals if OpenAI fails - provides variety across 7 days
+ * Diabetic-safe fallback meals (used when the AI call fails).
+ * All meals use everyday portion units and lean towards local / South Asian
+ * staples with controlled carbs.
  */
 function getFallbackMeals(dayIndex, calorieTarget) {
   const breakfastCal = Math.round(calorieTarget * 0.25);
@@ -458,25 +475,179 @@ function getFallbackMeals(dayIndex, calorieTarget) {
 
   const mealTemplates = [
     {
-      breakfast: { mealType: 'Breakfast', name: 'Steel-Cut Oats & Berries', description: 'Nutritious whole grain oats provide sustained energy release and help stabilize blood sugar levels. Fresh berries are packed with antioxidants and vitamin C, supporting immune function and reducing inflammation. Almonds add healthy monounsaturated fats and protein, promoting satiety and heart health.', calories: breakfastCal, macros: { carbs: Math.round(breakfastCal * 0.5 / 4), protein: Math.round(breakfastCal * 0.15 / 4), fat: Math.round(breakfastCal * 0.35 / 9) }, tags: ['Low GI', 'Heart-Smart'], ingredients: ['Oats', 'Berries', 'Almonds'] },
-      lunch: { mealType: 'Lunch', name: 'Mediterranean Chickpea Bowl', description: 'Chickpeas are an excellent source of plant-based protein and fiber, supporting digestive health and providing long-lasting energy. The combination of fresh vegetables delivers essential vitamins and minerals while olive oil contributes heart-healthy monounsaturated fats. This meal supports weight management and cardiovascular wellness.', calories: lunchCal, macros: { carbs: Math.round(lunchCal * 0.5 / 4), protein: Math.round(lunchCal * 0.15 / 4), fat: Math.round(lunchCal * 0.35 / 9) }, tags: ['Low Sodium'], ingredients: ['Chickpeas', 'Vegetables', 'Olive Oil'] },
-      dinner: { mealType: 'Dinner', name: 'Baked Salmon, Greens & Quinoa', description: 'Salmon is rich in omega-3 fatty acids, which support brain health, reduce inflammation, and promote cardiovascular wellness. Quinoa provides complete protein and essential amino acids, while leafy greens deliver antioxidants, fiber, and vital nutrients. This combination supports muscle recovery and overall metabolic health.', calories: dinnerCal, macros: { carbs: Math.round(dinnerCal * 0.4 / 4), protein: Math.round(dinnerCal * 0.35 / 4), fat: Math.round(dinnerCal * 0.25 / 9) }, tags: ['Low GI', 'Omega-3'], ingredients: ['Salmon', 'Quinoa', 'Greens'] },
-      snack: { mealType: 'Snack', name: 'Apple + Almond Butter', description: 'Apples provide natural fiber and vitamin C, supporting digestive health and immune function. Almond butter offers healthy fats and protein, helping to stabilize blood sugar and keep you satisfied between meals. This combination provides sustained energy without causing blood sugar spikes.', calories: snackCal, macros: { carbs: Math.round(snackCal * 0.5 / 4), protein: Math.round(snackCal * 0.1 / 4), fat: Math.round(snackCal * 0.4 / 9) }, tags: ['Low GI'], ingredients: ['Apple', 'Almond Butter'] }
+      breakfast: { mealType: 'Breakfast', name: 'Vegetable Omelette + ½ Roti', portionGuide: '2-egg vegetable omelette + ½ whole-wheat roti + 1 cup green tea', sugarImpact: 'Low', description: 'Eggs give slow-digesting protein that keeps blood sugar steady. Half a whole-wheat roti adds just enough fibre-rich carbs without spiking glucose. Green tea supports insulin sensitivity.', calories: breakfastCal, macros: { carbs: Math.round(breakfastCal * 0.35 / 4), protein: Math.round(breakfastCal * 0.30 / 4), fat: Math.round(breakfastCal * 0.35 / 9) }, tags: ['Low GI', 'Diabetes-friendly'], ingredients: ['Eggs', 'Tomato', 'Onion', 'Whole-wheat atta'] },
+      lunch: { mealType: 'Lunch', name: 'Chicken Salan with 1 Roti', portionGuide: '1 whole-wheat roti + 1 cup chicken salan (low-oil) + salad', sugarImpact: 'Low', description: 'Lean chicken provides high-quality protein and the salan uses tomato-onion gravy instead of heavy cream. A single whole-wheat roti and a fresh salad slow glucose absorption.', calories: lunchCal, macros: { carbs: Math.round(lunchCal * 0.35 / 4), protein: Math.round(lunchCal * 0.35 / 4), fat: Math.round(lunchCal * 0.30 / 9) }, tags: ['High Protein', 'Diabetes-friendly'], ingredients: ['Chicken', 'Tomato', 'Onion', 'Whole-wheat roti', 'Cucumber'] },
+      dinner: { mealType: 'Dinner', name: 'Daal Palak with ½ Cup Brown Rice', portionGuide: '1 cup daal palak + ½ cup brown rice + cucumber raita', sugarImpact: 'Low', description: 'Lentils and spinach are loaded with fibre and plant protein, keeping sugar release slow. Brown rice has a lower GI than white rice. Plain yoghurt raita aids digestion.', calories: dinnerCal, macros: { carbs: Math.round(dinnerCal * 0.40 / 4), protein: Math.round(dinnerCal * 0.25 / 4), fat: Math.round(dinnerCal * 0.35 / 9) }, tags: ['High Fibre', 'Diabetes-friendly'], ingredients: ['Masoor daal', 'Spinach', 'Brown rice', 'Yoghurt'] },
+      snack: { mealType: 'Snack', name: 'Apple + 6 Almonds', portionGuide: '1 small apple + 6 almonds', sugarImpact: 'Low', description: 'A small apple gives gentle natural sweetness with fibre. Almonds add healthy fat and protein that flatten the sugar curve.', calories: snackCal, macros: { carbs: Math.round(snackCal * 0.50 / 4), protein: Math.round(snackCal * 0.10 / 4), fat: Math.round(snackCal * 0.40 / 9) }, tags: ['Low GI'], ingredients: ['Apple', 'Almonds'] }
     },
     {
-      breakfast: { mealType: 'Breakfast', name: 'Greek Yogurt Parfait', description: 'Greek yogurt is an excellent source of protein and probiotics, supporting muscle maintenance and gut health. The combination with granola provides complex carbohydrates for sustained energy, while fresh fruit adds natural sweetness and essential vitamins. This meal promotes satiety and supports digestive wellness.', calories: breakfastCal, macros: { carbs: Math.round(breakfastCal * 0.45 / 4), protein: Math.round(breakfastCal * 0.25 / 4), fat: Math.round(breakfastCal * 0.30 / 9) }, tags: ['High Protein'], ingredients: ['Greek Yogurt', 'Granola', 'Berries'] },
-      lunch: { mealType: 'Lunch', name: 'Grilled Chicken Salad', description: 'Lean chicken breast provides high-quality protein essential for muscle repair and satiety. Mixed greens deliver antioxidants, fiber, and essential nutrients while keeping calories low. The vinaigrette adds healthy fats that aid in nutrient absorption. This meal supports weight management and provides sustained energy.', calories: lunchCal, macros: { carbs: Math.round(lunchCal * 0.25 / 4), protein: Math.round(lunchCal * 0.40 / 4), fat: Math.round(lunchCal * 0.35 / 9) }, tags: ['High Protein', 'Low Carb'], ingredients: ['Chicken', 'Mixed Greens', 'Vinaigrette'] },
-      dinner: { mealType: 'Dinner', name: 'Vegetable Stir-Fry with Tofu', description: 'Tofu provides complete plant-based protein and isoflavones, supporting heart health and hormonal balance. Colorful vegetables deliver a wide range of antioxidants, vitamins, and fiber. This meal is low in saturated fat and supports cardiovascular health while providing essential nutrients for overall wellness.', calories: dinnerCal, macros: { carbs: Math.round(dinnerCal * 0.45 / 4), protein: Math.round(dinnerCal * 0.25 / 4), fat: Math.round(dinnerCal * 0.30 / 9) }, tags: ['Vegetarian'], ingredients: ['Tofu', 'Mixed Vegetables', 'Soy Sauce'] },
-      snack: { mealType: 'Snack', name: 'Mixed Nuts & Dried Fruit', description: 'Nuts provide healthy monounsaturated and polyunsaturated fats, supporting heart health and brain function. They also offer protein and fiber for satiety. Dried fruits add natural sweetness, fiber, and essential minerals. This combination provides sustained energy and supports cardiovascular wellness.', calories: snackCal, macros: { carbs: Math.round(snackCal * 0.35 / 4), protein: Math.round(snackCal * 0.15 / 4), fat: Math.round(snackCal * 0.50 / 9) }, tags: ['Heart-Smart'], ingredients: ['Almonds', 'Walnuts', 'Dried Apricots'] }
+      breakfast: { mealType: 'Breakfast', name: 'Plain Yoghurt + Chia + Berries', portionGuide: '1 cup plain yoghurt + 1 tbsp chia + ½ cup berries', sugarImpact: 'Low', description: 'Plain yoghurt is protein-rich with no added sugar. Chia seeds add omega-3 and fibre that slow glucose. Berries give natural sweetness with a very low GI.', calories: breakfastCal, macros: { carbs: Math.round(breakfastCal * 0.35 / 4), protein: Math.round(breakfastCal * 0.30 / 4), fat: Math.round(breakfastCal * 0.35 / 9) }, tags: ['High Protein', 'Low GI'], ingredients: ['Plain yoghurt', 'Chia seeds', 'Berries'] },
+      lunch: { mealType: 'Lunch', name: 'Qeema with 1 Roti + Salad', portionGuide: '1 cup lean beef qeema + 1 whole-wheat roti + cucumber/tomato salad', sugarImpact: 'Low', description: 'Lean qeema is high in protein and iron and pairs well with a single whole-wheat roti. The salad delivers fibre and water that further smooth out blood-sugar response.', calories: lunchCal, macros: { carbs: Math.round(lunchCal * 0.30 / 4), protein: Math.round(lunchCal * 0.40 / 4), fat: Math.round(lunchCal * 0.30 / 9) }, tags: ['High Protein'], ingredients: ['Lean beef qeema', 'Onion', 'Whole-wheat roti', 'Cucumber'] },
+      dinner: { mealType: 'Dinner', name: 'Grilled Fish + Sautéed Veggies', portionGuide: '120 g grilled fish + 1 cup sautéed seasonal veggies + lemon', sugarImpact: 'Low', description: 'Fish provides omega-3 and protein with almost zero impact on glucose. A generous serving of non-starchy veggies adds volume, fibre and micronutrients.', calories: dinnerCal, macros: { carbs: Math.round(dinnerCal * 0.20 / 4), protein: Math.round(dinnerCal * 0.45 / 4), fat: Math.round(dinnerCal * 0.35 / 9) }, tags: ['Omega-3', 'Low Carb'], ingredients: ['White fish', 'Olive oil', 'Mixed vegetables'] },
+      snack: { mealType: 'Snack', name: 'Roasted Chana + Green Tea', portionGuide: '½ cup roasted chana + 1 cup green tea', sugarImpact: 'Low', description: 'Roasted chickpeas (chana) are crunchy, high in fibre and plant protein and absolutely budget-friendly. Green tea adds antioxidants that may help insulin sensitivity.', calories: snackCal, macros: { carbs: Math.round(snackCal * 0.45 / 4), protein: Math.round(snackCal * 0.25 / 4), fat: Math.round(snackCal * 0.30 / 9) }, tags: ['Budget'], ingredients: ['Roasted chana', 'Green tea'] }
     },
     {
-      breakfast: { mealType: 'Breakfast', name: 'Avocado Toast with Eggs', description: 'Whole grain bread provides complex carbohydrates and fiber for sustained energy release. Avocado offers heart-healthy monounsaturated fats and potassium, supporting cardiovascular health and blood pressure regulation. Eggs provide high-quality protein and choline, essential for brain function and muscle maintenance.', calories: breakfastCal, macros: { carbs: Math.round(breakfastCal * 0.35 / 4), protein: Math.round(breakfastCal * 0.25 / 4), fat: Math.round(breakfastCal * 0.40 / 9) }, tags: ['High Protein'], ingredients: ['Whole Grain Bread', 'Avocado', 'Eggs'] },
-      lunch: { mealType: 'Lunch', name: 'Lentil Soup with Whole Grain Bread', description: 'Lentils are an excellent source of plant-based protein, fiber, and iron, supporting digestive health and preventing anemia. The combination with whole grain bread provides complex carbohydrates for sustained energy. This meal promotes satiety, supports blood sugar stability, and provides essential nutrients for overall health.', calories: lunchCal, macros: { carbs: Math.round(lunchCal * 0.55 / 4), protein: Math.round(lunchCal * 0.20 / 4), fat: Math.round(lunchCal * 0.25 / 9) }, tags: ['High Fiber'], ingredients: ['Lentils', 'Vegetables', 'Whole Grain Bread'] },
-      dinner: { mealType: 'Dinner', name: 'Grilled Fish with Sweet Potato', description: 'White fish provides lean protein and omega-3 fatty acids, supporting muscle health and reducing inflammation. Sweet potatoes are rich in beta-carotene, fiber, and complex carbohydrates, supporting eye health and providing sustained energy. This meal promotes recovery and overall metabolic wellness.', calories: dinnerCal, macros: { carbs: Math.round(dinnerCal * 0.40 / 4), protein: Math.round(dinnerCal * 0.30 / 4), fat: Math.round(dinnerCal * 0.30 / 9) }, tags: ['Omega-3'], ingredients: ['White Fish', 'Sweet Potato', 'Broccoli'] },
-      snack: { mealType: 'Snack', name: 'Hummus with Veggie Sticks', description: 'Hummus provides plant-based protein, fiber, and healthy fats from chickpeas and tahini, supporting satiety and digestive health. Fresh vegetables deliver essential vitamins, minerals, and antioxidants with minimal calories. This snack supports weight management and provides essential nutrients between meals.', calories: snackCal, macros: { carbs: Math.round(snackCal * 0.45 / 4), protein: Math.round(snackCal * 0.15 / 4), fat: Math.round(snackCal * 0.40 / 9) }, tags: ['Vegetarian'], ingredients: ['Hummus', 'Carrots', 'Cucumber'] }
+      breakfast: { mealType: 'Breakfast', name: 'Daal Chilla (Lentil Pancake)', portionGuide: '2 small daal chilla + 1 boiled egg + mint chutney', sugarImpact: 'Low', description: 'Daal chilla replaces refined flour with lentils — far higher fibre and protein. A boiled egg keeps you full for hours and prevents mid-morning sugar dips.', calories: breakfastCal, macros: { carbs: Math.round(breakfastCal * 0.40 / 4), protein: Math.round(breakfastCal * 0.30 / 4), fat: Math.round(breakfastCal * 0.30 / 9) }, tags: ['Low GI', 'Vegetarian'], ingredients: ['Moong daal', 'Egg', 'Mint', 'Onion'] },
+      lunch: { mealType: 'Lunch', name: 'Mixed Vegetable Sabzi + 1 Roti', portionGuide: '1 cup mixed sabzi + 1 whole-wheat roti + plain yoghurt', sugarImpact: 'Low', description: 'A medley of seasonal vegetables in light oil delivers fibre, vitamins and slow carbs. Plain yoghurt provides probiotics and protein.', calories: lunchCal, macros: { carbs: Math.round(lunchCal * 0.45 / 4), protein: Math.round(lunchCal * 0.20 / 4), fat: Math.round(lunchCal * 0.35 / 9) }, tags: ['Vegetarian', 'High Fibre'], ingredients: ['Seasonal veg', 'Whole-wheat roti', 'Plain yoghurt'] },
+      dinner: { mealType: 'Dinner', name: 'Chicken & Vegetable Soup', portionGuide: '1 large bowl chicken-vegetable soup + 1 small whole-wheat roti', sugarImpact: 'Low', description: 'A protein-rich soup is light on the stomach in the evening, easy on blood sugar, and perfect with one small roti for slow-release energy through the night.', calories: dinnerCal, macros: { carbs: Math.round(dinnerCal * 0.30 / 4), protein: Math.round(dinnerCal * 0.40 / 4), fat: Math.round(dinnerCal * 0.30 / 9) }, tags: ['High Protein', 'Low GI'], ingredients: ['Chicken', 'Carrot', 'Beans', 'Whole-wheat roti'] },
+      snack: { mealType: 'Snack', name: 'Guava + Walnuts', portionGuide: '1 small guava + 4 walnut halves', sugarImpact: 'Low', description: 'Guava is one of the best low-GI fruits for diabetics — rich in fibre and vitamin C. Walnuts add omega-3 and slow the sugar release.', calories: snackCal, macros: { carbs: Math.round(snackCal * 0.50 / 4), protein: Math.round(snackCal * 0.10 / 4), fat: Math.round(snackCal * 0.40 / 9) }, tags: ['Low GI'], ingredients: ['Guava', 'Walnuts'] }
     }
   ];
 
   const template = mealTemplates[dayIndex % mealTemplates.length];
   return [template.breakfast, template.lunch, template.dinner, template.snack];
 }
+
+// ---------------------------------------------------------------------------
+// "Can I eat this?" food checker
+// ---------------------------------------------------------------------------
+export const checkFood = async (req, res) => {
+  try {
+    const { food, portion } = req.body;
+    if (!food || typeof food !== 'string' || !food.trim()) {
+      return res.status(400).json({ success: false, message: 'Food name is required' });
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    try {
+      const result = await checkFoodSafetyWithAI(user, food.trim(), portion || '');
+      if (!result) throw new Error('No AI result');
+      return res.json({ success: true, food: food.trim(), portion: portion || '', result });
+    } catch (err) {
+      console.warn('[checkFood] AI failed, using fallback:', err.message);
+      const lower = food.toLowerCase();
+      const watchList = ['sugar', 'mithai', 'gulab jamun', 'jalebi', 'soft drink', 'coke', 'pepsi', 'fruit juice', 'white rice', 'biryani', 'naan'];
+      const safeList = ['vegetable', 'salad', 'cucumber', 'spinach', 'daal', 'lentil', 'chicken', 'fish', 'egg', 'yoghurt', 'almond', 'walnut', 'apple', 'pear', 'guava', 'berry'];
+      const isWatch = watchList.some(w => lower.includes(w));
+      const isSafe = safeList.some(w => lower.includes(w));
+      const verdict = isWatch ? 'Eat with care' : (isSafe ? 'Safe' : 'Eat with care');
+      return res.json({
+        success: true,
+        food: food.trim(),
+        portion: portion || '',
+        result: {
+          verdict,
+          reason: verdict === 'Safe'
+            ? 'This food is generally low impact on blood sugar.'
+            : 'This food can raise blood sugar — keep the portion small and pair with protein or fibre.',
+          safePortion: verdict === 'Safe' ? '1 normal serving' : 'A very small portion (e.g. ½ cup)',
+          sugarImpact: verdict === 'Safe' ? 'Low' : 'Watch',
+          betterAlternatives: ['Vegetable salad', 'Plain yoghurt', 'Boiled egg'],
+          tips: ['Pair carbs with protein or fibre', 'Walk 10 minutes after eating']
+        }
+      });
+    }
+  } catch (error) {
+    console.error('[checkFood] error:', error);
+    res.status(500).json({ success: false, message: 'Failed to check food', error: error.message });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Sugar-safe food swaps
+// ---------------------------------------------------------------------------
+export const foodSwaps = async (req, res) => {
+  try {
+    const { food } = req.body;
+    if (!food || typeof food !== 'string' || !food.trim()) {
+      return res.status(400).json({ success: false, message: 'Food name is required' });
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    try {
+      const swaps = await generateFoodSwapsWithAI(user, food.trim());
+      if (!swaps || !swaps.length) throw new Error('No swaps returned');
+      return res.json({ success: true, food: food.trim(), swaps });
+    } catch (err) {
+      console.warn('[foodSwaps] AI failed, using fallback:', err.message);
+      const fallback = [
+        { original: food.trim(), swap: 'Vegetable salad with lemon', portion: '1 bowl', sugarImpact: 'Low', why: 'High fibre, very low GI.' },
+        { original: food.trim(), swap: 'Plain yoghurt with chia', portion: '1 cup', sugarImpact: 'Low', why: 'High protein, no added sugar.' },
+        { original: food.trim(), swap: 'Boiled chana chaat (no chutney sugar)', portion: '½ cup', sugarImpact: 'Low', why: 'Plant protein + fibre, slow digestion.' },
+        { original: food.trim(), swap: 'Apple + 6 almonds', portion: '1 small apple', sugarImpact: 'Low', why: 'Natural sweetness balanced by fat & protein.' }
+      ];
+      return res.json({ success: true, food: food.trim(), swaps: fallback });
+    }
+  } catch (error) {
+    console.error('[foodSwaps] error:', error);
+    res.status(500).json({ success: false, message: 'Failed to get swaps', error: error.message });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Weekly grocery list
+// ---------------------------------------------------------------------------
+export const groceryList = async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const activePlan = await MealPlan.findOne({ userId: req.userId, isActive: true }).sort({ createdAt: -1 });
+    const plannedMeals = [];
+    if (activePlan && Array.isArray(activePlan.days)) {
+      for (const day of activePlan.days) {
+        for (const m of day.meals || []) {
+          if (m?.name) plannedMeals.push(m.name);
+        }
+      }
+    }
+
+    try {
+      const list = await generateGroceryListWithAI(user, plannedMeals);
+      if (!list || !list.categories || !list.categories.length) throw new Error('Empty grocery list');
+      return res.json({ success: true, list });
+    } catch (err) {
+      console.warn('[groceryList] AI failed, using fallback:', err.message);
+      const fallback = {
+        categories: [
+          { name: 'Vegetables', items: [
+            { name: 'Spinach', quantity: '500 g', note: 'For daal palak' },
+            { name: 'Tomato', quantity: '1 kg', note: '' },
+            { name: 'Onion', quantity: '1 kg', note: '' },
+            { name: 'Cucumber', quantity: '500 g', note: 'Salad' },
+            { name: 'Mixed seasonal veg', quantity: '1 kg', note: 'For sabzi' }
+          ]},
+          { name: 'Fruits (low sugar)', items: [
+            { name: 'Apple', quantity: '5 pieces', note: '' },
+            { name: 'Guava', quantity: '5 pieces', note: '' },
+            { name: 'Berries (any)', quantity: '250 g', note: 'Optional' }
+          ]},
+          { name: 'Grains & Pulses', items: [
+            { name: 'Whole-wheat atta', quantity: '2 kg', note: 'For roti' },
+            { name: 'Brown rice', quantity: '1 kg', note: 'Replaces white rice' },
+            { name: 'Masoor daal', quantity: '500 g', note: '' },
+            { name: 'Moong daal', quantity: '500 g', note: '' }
+          ]},
+          { name: 'Protein', items: [
+            { name: 'Chicken breast', quantity: '1 kg', note: '' },
+            { name: 'Eggs', quantity: '1 dozen', note: '' },
+            { name: 'White fish', quantity: '500 g', note: 'Optional' }
+          ]},
+          { name: 'Dairy & Eggs', items: [
+            { name: 'Plain yoghurt', quantity: '1 kg', note: 'No added sugar' }
+          ]},
+          { name: 'Pantry / Spices', items: [
+            { name: 'Olive / mustard oil', quantity: '500 ml', note: '' },
+            { name: 'Cumin, turmeric, coriander', quantity: 'as needed', note: '' },
+            { name: 'Chia seeds', quantity: '100 g', note: '' },
+            { name: 'Green tea', quantity: '1 pack', note: '' }
+          ]},
+          { name: 'Snacks (diabetic-safe)', items: [
+            { name: 'Almonds', quantity: '250 g', note: '' },
+            { name: 'Walnuts', quantity: '200 g', note: '' },
+            { name: 'Roasted chana', quantity: '250 g', note: '' }
+          ]}
+        ],
+        avoid: ['White sugar', 'Soft drinks', 'Fruit juice', 'Sweets / mithai', 'Naan / refined-flour breads']
+      };
+      return res.json({ success: true, list: fallback });
+    }
+  } catch (error) {
+    console.error('[groceryList] error:', error);
+    res.status(500).json({ success: false, message: 'Failed to build grocery list', error: error.message });
+  }
+};

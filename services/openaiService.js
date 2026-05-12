@@ -1,60 +1,117 @@
 import OpenAI from 'openai';
 
-let openai = null;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY ||
+  'REMOVED_KEY';
 
-if ('REMOVED_KEY') {
-  openai = new OpenAI({ apiKey: 'REMOVED_KEY' });
+let openai = null;
+if (OPENAI_API_KEY) {
+  openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 } else {
   console.warn('⚠️  OPENAI_API_KEY not set. AI features will use fallback responses.');
 }
 
+// ---------------------------------------------------------------------------
+// Helper: build a compact "diabetic user context" block reused by every prompt
+// ---------------------------------------------------------------------------
+function buildDiabeticContext(user) {
+  const dietStyle = [
+    user.dietPreferences?.vegetarian ? 'Vegetarian' : null,
+    user.dietPreferences?.vegan ? 'Vegan' : null,
+    user.dietPreferences?.glutenFree ? 'Gluten-Free' : null,
+    user.dietPreferences?.dairyFree ? 'Dairy-Free' : null,
+  ].filter(Boolean).join(', ') || 'No restriction';
+
+  const healthConditions = user.healthConditions?.join(', ') || 'None reported';
+  const allergies = user.dietPreferences?.allergies?.join(', ') || 'None';
+  const meds = (user.medications || [])
+    .map(m => `${m.name}${m.dosage ? ' ' + m.dosage : ''}${m.timing ? ' @ ' + m.timing : ''}`)
+    .join('; ') || 'None';
+  const likes = (user.foodLikes || []).join(', ') || 'No specific likes';
+  const dislikes = (user.foodDislikes || []).join(', ') || 'None';
+  const localFoods = (user.localFoodPreferences || []).join(', ') || 'No specific local foods';
+
+  return `DIABETIC USER PROFILE
+- Diabetes status: ${user.diabetesType || 'Not specified'}
+- Latest fasting blood sugar: ${user.fastingSugar != null ? user.fastingSugar + ' mg/dL' : 'Not recorded'}
+- Latest HbA1c: ${user.hba1c != null ? user.hba1c + ' %' : 'Not recorded'}
+- Other health conditions: ${healthConditions}
+- Medications & timing: ${meds}
+- Diet style: ${dietStyle}
+- Allergies: ${allergies}
+- Likes: ${likes}
+- Dislikes: ${dislikes}
+- Local food preferences: ${localFoods}
+- Budget: ${user.budget || 'Medium'}
+- Cooking time available: ${user.cookingTime || 'Moderate (20-40 min)'}`;
+}
+
+const DIABETIC_SYSTEM_PROMPT = `You are a certified diabetes-focused nutrition coach for the "Diabetic Diet AI Coach" app.
+You specialise in blood sugar control, low glycaemic index (low-GI) eating, and culturally appropriate diabetic meals — especially South Asian / Pakistani / Indian foods (roti, rice, daal, salan, qeema, biryani, fruits).
+Core principles you ALWAYS apply:
+1. Prioritise low-GI, high-fibre carbs. Limit refined sugar and white-flour foods.
+2. Show clear PORTIONS in everyday units: "½ roti", "1 roti", "½ cup cooked rice", "1 small fruit", "1 cup daal".
+3. Pair carbs with protein, fibre, or healthy fat to slow glucose spikes.
+4. Respect cultural foods, the user's budget and cooking time.
+5. Flag anything that may spike blood sugar (white sugar, sugary drinks, mithai, white rice in large portions, fruit juice, etc.).
+6. Never replace medical advice — remind the user to consult their doctor for medication changes.
+Return ONLY valid JSON when a JSON schema is requested. No markdown, no extra commentary.`;
+
+// ---------------------------------------------------------------------------
+// 1) Daily / weekly diabetic meal plan
+// ---------------------------------------------------------------------------
+
 /**
- * Generate a single day's meal plan (optimized for parallel processing)
+ * Generate a single day's meal plan optimised for diabetic users.
  */
 export async function generateMealPlanDayWithAI(user, dailyCalorieTarget, dailyMacroTargets, dayNumber) {
   if (!openai) return null;
-
-  const timeout = 15000; // 15 second timeout per day
+  const timeout = 15000;
 
   try {
-    const healthConditions = user.healthConditions?.join(', ') || 'None';
-    const allergies = user.dietPreferences?.allergies?.join(', ') || 'None';
-    const vegetarian = user.dietPreferences?.vegetarian ? 'Yes' : 'No';
-    const vegan = user.dietPreferences?.vegan ? 'Yes' : 'No';
-    const glutenFree = user.dietPreferences?.glutenFree ? 'Yes' : 'No';
-    const dairyFree = user.dietPreferences?.dairyFree ? 'Yes' : 'No';
+    const context = buildDiabeticContext(user);
 
-    const prompt = `Generate Day ${dayNumber} meal plan (4 meals: Breakfast ~${Math.round(dailyCalorieTarget * 0.25)}kcal, Lunch ~${Math.round(dailyCalorieTarget * 0.35)}kcal, Dinner ~${Math.round(dailyCalorieTarget * 0.30)}kcal, Snack ~${Math.round(dailyCalorieTarget * 0.10)}kcal).
+    const prompt = `${context}
 
-User: ${dailyCalorieTarget}kcal/day, Carbs:${dailyMacroTargets.carbs}g Protein:${dailyMacroTargets.protein}g Fat:${dailyMacroTargets.fat}g. Conditions:${healthConditions}. Allergies:${allergies}. Diet:${vegetarian === 'Yes' ? 'Vegetarian' : ''}${vegan === 'Yes' ? 'Vegan' : ''}${glutenFree === 'Yes' ? 'Gluten-Free' : ''}${dairyFree === 'Yes' ? 'Dairy-Free' : ''}
+Generate Day ${dayNumber} of a 7-day DIABETIC meal plan. Provide 4 meals:
+ - Breakfast ~${Math.round(dailyCalorieTarget * 0.25)}kcal
+ - Lunch ~${Math.round(dailyCalorieTarget * 0.35)}kcal
+ - Dinner ~${Math.round(dailyCalorieTarget * 0.30)}kcal
+ - Snack ~${Math.round(dailyCalorieTarget * 0.10)}kcal
 
-For each meal, provide a detailed "description" field (2-3 sentences) explaining:
-- What makes this meal nutritious and beneficial
-- Key health advantages (e.g., "Rich in omega-3s for heart health", "High fiber for digestive wellness", "Protein-packed for muscle recovery")
-- How it supports the user's dietary goals and health conditions
+Macro targets per day: Carbs ${dailyMacroTargets.carbs}g (prefer complex carbs / low-GI), Protein ${dailyMacroTargets.protein}g, Fat ${dailyMacroTargets.fat}g.
+
+RULES:
+- Use the user's local foods, likes, budget and cooking time wherever possible.
+- Each meal MUST include a clear "portionGuide" in everyday units (e.g. "1 roti + ½ cup daal + salad", "½ cup cooked basmati rice + chicken salan").
+- Each meal MUST include a "sugarImpact" tag: one of "Low", "Moderate", "Watch".
+- Avoid white sugar, sugary drinks, fruit juice, sweets / mithai, and large portions of white rice.
+- Description should explain WHY this meal is good for blood sugar (2-3 sentences).
 
 Return JSON only:
-{"meals":[{"mealType":"Breakfast","name":"...","description":"Detailed 2-3 sentence description with health advantages and benefits...","calories":0,"macros":{"carbs":0,"protein":0,"fat":0},"tags":["..."],"ingredients":["..."]},{"mealType":"Lunch",...},{"mealType":"Dinner",...},{"mealType":"Snack",...}]}`;
+{"meals":[
+  {"mealType":"Breakfast","name":"...","description":"...","portionGuide":"e.g. 1 roti + 1 boiled egg + ½ cup yoghurt","sugarImpact":"Low","calories":0,"macros":{"carbs":0,"protein":0,"fat":0},"tags":["Low GI","Diabetes-friendly"],"ingredients":["..."]},
+  {"mealType":"Lunch", ...},
+  {"mealType":"Dinner", ...},
+  {"mealType":"Snack", ...}
+]}`;
 
     const responsePromise = openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
-        { role: 'system', content: 'You are a nutritionist. Return valid JSON only, no markdown.' },
+        { role: 'system', content: DIABETIC_SYSTEM_PROMPT },
         { role: 'user', content: prompt }
       ],
       temperature: 0.8,
-      max_tokens: 1800 // Increased to accommodate detailed descriptions
+      max_tokens: 2000
     });
 
-    // Add timeout
-    const timeoutPromise = new Promise((_, reject) => 
+    const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error('OpenAI request timeout')), timeout)
     );
 
     const response = await Promise.race([responsePromise, timeoutPromise]);
     const content = response.choices[0].message.content.trim();
 
-    // Parse JSON response
     let mealData;
     try {
       const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
@@ -65,11 +122,12 @@ Return JSON only:
       throw new Error('Failed to parse meal plan response');
     }
 
-    // Validate and normalize response
     const meals = (mealData.meals || mealData.days?.[0]?.meals || []).map(meal => ({
       mealType: meal.mealType || '',
       name: meal.name || '',
       description: meal.description || '',
+      portionGuide: meal.portionGuide || '',
+      sugarImpact: meal.sugarImpact || 'Low',
       calories: typeof meal.calories === 'number' ? meal.calories : 0,
       macros: {
         carbs: meal.macros?.carbs || 0,
@@ -80,7 +138,6 @@ Return JSON only:
       ingredients: meal.ingredients || []
     }));
 
-    // Validate required fields
     if (meals.length !== 4 || !meals.every(m => m.name && m.mealType && m.calories > 0)) {
       throw new Error('Invalid meal structure');
     }
@@ -93,52 +150,55 @@ Return JSON only:
 }
 
 /**
- * Generate full 7-day meal plan in one API call (faster but less flexible)
+ * Generate the full 7-day diabetic meal plan in one OpenAI call.
  */
 export async function generateMealPlanWithAI(user, dailyCalorieTarget, dailyMacroTargets) {
   if (!openai) return null;
-
-  const timeout = 30000; // 30 second timeout for full plan
+  const timeout = 35000;
 
   try {
-    const healthConditions = user.healthConditions?.join(', ') || 'None';
-    const allergies = user.dietPreferences?.allergies?.join(', ') || 'None';
-    const vegetarian = user.dietPreferences?.vegetarian ? 'Yes' : 'No';
-    const vegan = user.dietPreferences?.vegan ? 'Yes' : 'No';
-    const glutenFree = user.dietPreferences?.glutenFree ? 'Yes' : 'No';
-    const dairyFree = user.dietPreferences?.dairyFree ? 'Yes' : 'No';
+    const context = buildDiabeticContext(user);
 
-    const prompt = `Generate 7-day meal plan. Each day: 4 meals (Breakfast ~${Math.round(dailyCalorieTarget * 0.25)}kcal, Lunch ~${Math.round(dailyCalorieTarget * 0.35)}kcal, Dinner ~${Math.round(dailyCalorieTarget * 0.30)}kcal, Snack ~${Math.round(dailyCalorieTarget * 0.10)}kcal).
+    const prompt = `${context}
 
-User: ${dailyCalorieTarget}kcal/day, Carbs:${dailyMacroTargets.carbs}g Protein:${dailyMacroTargets.protein}g Fat:${dailyMacroTargets.fat}g. Conditions:${healthConditions}. Allergies:${allergies}. Diet:${vegetarian === 'Yes' ? 'Vegetarian' : ''}${vegan === 'Yes' ? 'Vegan' : ''}${glutenFree === 'Yes' ? 'Gluten-Free' : ''}${dairyFree === 'Yes' ? 'Dairy-Free' : ''}
+Generate a 7-DAY diabetic-safe meal plan. Each day must include 4 meals:
+ - Breakfast ~${Math.round(dailyCalorieTarget * 0.25)}kcal
+ - Lunch ~${Math.round(dailyCalorieTarget * 0.35)}kcal
+ - Dinner ~${Math.round(dailyCalorieTarget * 0.30)}kcal
+ - Snack ~${Math.round(dailyCalorieTarget * 0.10)}kcal
 
-For each meal, provide a detailed "description" field (2-3 sentences) explaining:
-- What makes this meal nutritious and beneficial
-- Key health advantages (e.g., "Rich in omega-3s for heart health", "High fiber for digestive wellness", "Protein-packed for muscle recovery")
-- How it supports the user's dietary goals and health conditions
+Macro targets per day: Carbs ${dailyMacroTargets.carbs}g (LOW-GI), Protein ${dailyMacroTargets.protein}g, Fat ${dailyMacroTargets.fat}g.
+
+REQUIREMENTS:
+- Use the user's local foods, likes, budget and cooking time wherever possible.
+- Vary meals across the 7 days (no exact repeats).
+- Each meal MUST include "portionGuide" in everyday units (e.g. "1 roti + ½ cup daal + salad", "½ cup cooked basmati rice + chicken salan").
+- Each meal MUST include a "sugarImpact" tag: "Low" | "Moderate" | "Watch".
+- Avoid white sugar, sugary drinks, mithai, fruit juice and large portions of white rice.
 
 Return JSON only:
-{"days":[{"meals":[{"mealType":"Breakfast","name":"...","description":"Detailed 2-3 sentence description with health advantages and benefits...","calories":0,"macros":{"carbs":0,"protein":0,"fat":0},"tags":["..."],"ingredients":["..."]},...]},...]}`;
+{"days":[{"meals":[
+  {"mealType":"Breakfast","name":"...","description":"Why this is blood-sugar friendly (2-3 sentences)","portionGuide":"...","sugarImpact":"Low","calories":0,"macros":{"carbs":0,"protein":0,"fat":0},"tags":["Low GI","Diabetes-friendly"],"ingredients":["..."]},
+  ...
+]}, ... 7 days total ...]}`;
 
     const responsePromise = openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
-        { role: 'system', content: 'You are a nutritionist. Return valid JSON only, no markdown.' },
+        { role: 'system', content: DIABETIC_SYSTEM_PROMPT },
         { role: 'user', content: prompt }
       ],
       temperature: 0.8,
-      max_tokens: 5000 // Increased to accommodate detailed descriptions for all 7 days
+      max_tokens: 6000
     });
 
-    // Add timeout
-    const timeoutPromise = new Promise((_, reject) => 
+    const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error('OpenAI request timeout')), timeout)
     );
 
     const response = await Promise.race([responsePromise, timeoutPromise]);
     const content = response.choices[0].message.content.trim();
 
-    // Parse JSON response
     let mealPlanData;
     try {
       const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
@@ -149,12 +209,13 @@ Return JSON only:
       throw new Error('Failed to parse meal plan response');
     }
 
-    // Convert into our format
-    const days = mealPlanData.days.map(day => ({
-      meals: day.meals.map(meal => ({
+    const days = (mealPlanData.days || []).map(day => ({
+      meals: (day.meals || []).map(meal => ({
         mealType: meal.mealType || '',
         name: meal.name || '',
         description: meal.description || '',
+        portionGuide: meal.portionGuide || '',
+        sugarImpact: meal.sugarImpact || 'Low',
         calories: typeof meal.calories === 'number' ? meal.calories : 0,
         macros: {
           carbs: meal.macros?.carbs || 0,
@@ -173,194 +234,232 @@ Return JSON only:
   }
 }
 
-// import OpenAI from 'openai';
-
-// // Initialize OpenAI client (only if API key is provided)
-// let openai = null;
-// if ('REMOVED_KEY') {
-//   try {
-//     openai = new OpenAI({
-//       apiKey:  "REMOVED_KEY"
-//     });
-//   } catch (error) {
-//     console.warn('⚠️  OpenAI client initialization failed:', error.message);
-//   }
-// } else {
-//   console.warn('⚠️  OPENAI_API_KEY not set. AI features will use fallback responses.');
-// }
+// ---------------------------------------------------------------------------
+// 2) "Can I eat this?" food checker
+// ---------------------------------------------------------------------------
 
 /**
- * Generate meal plan using OpenAI
+ * Decide whether a specific food/dish is safe for the diabetic user.
  */
-// export async function generateMealPlanWithAI(user, dailyCalorieTarget, dailyMacroTargets, dayNumber) {
-//   // Check if OpenAI is initialized
-//   console.log('OpenAI client:', openai ? 'initialized' : 'not initialized');
-//   if (!openai) {
-//     console.warn('OpenAI not initialized, returning null to use fallback meals');
-//     return null;
-//   }
+export async function checkFoodSafetyWithAI(user, foodName, portion = '') {
+  if (!openai) return null;
+  const timeout = 12000;
 
-//   try {
-//     const healthConditions = user.healthConditions?.join(', ') || 'None';
-//     const allergies = user.dietPreferences?.allergies?.join(', ') || 'None';
-//     const vegetarian = user.dietPreferences?.vegetarian ? 'Yes' : 'No';
-//     const vegan = user.dietPreferences?.vegan ? 'Yes' : 'No';
-//     const glutenFree = user.dietPreferences?.glutenFree ? 'Yes' : 'No';
-//     const dairyFree = user.dietPreferences?.dairyFree ? 'Yes' : 'No';
+  try {
+    const context = buildDiabeticContext(user);
 
-//     const prompt = `You are a professional nutritionist. Generate a personalized meal plan for Day ${dayNumber} of a 7-day plan.
+    const prompt = `${context}
 
-// User Profile:
-// - Daily Calorie Target: ${dailyCalorieTarget} kcal
-// - Daily Macro Targets: Carbs ${dailyMacroTargets.carbs}g, Protein ${dailyMacroTargets.protein}g, Fat ${dailyMacroTargets.fat}g
-// - Health Conditions: ${healthConditions}
-// - Allergies: ${allergies}
-// - Vegetarian: ${vegetarian}
-// - Vegan: ${vegan}
-// - Gluten-Free: ${glutenFree}
-// - Dairy-Free: ${dairyFree}
+The user is asking: "Can I eat ${foodName}${portion ? ' (' + portion + ')' : ''}?"
 
-// Generate a complete day's meal plan with:
-// 1. Breakfast (around 25% of daily calories)
-// 2. Lunch (around 35% of daily calories)
-// 3. Dinner (around 30% of daily calories)
-// 4. Snack (around 10% of daily calories)
+Decide based on the user's diabetes status, latest sugar / HbA1c, medications, allergies and diet style.
 
-// For each meal, provide:
-// - Meal name (creative and appetizing)
-// - Calories (exact number)
-// - Macros: carbs, protein, fat in grams
-// - Tags (e.g., "Low GI", "Heart-Smart", "Low Sodium", "High Protein", "Omega-3")
-// - Brief description (1-2 sentences)
-// - Key ingredients (3-5 main ingredients)
+Return JSON only:
+{
+  "verdict": "Safe" | "Eat with care" | "Avoid",
+  "reason": "Short 1-2 sentence reason in plain language.",
+  "safePortion": "Specific portion the user MAY eat, e.g. '½ cup cooked rice with daal & salad' or 'Up to 1 small apple after meal'",
+  "sugarImpact": "Low" | "Moderate" | "Watch",
+  "betterAlternatives": ["alt 1", "alt 2", "alt 3"],
+  "tips": ["practical tip 1", "tip 2"]
+}`;
 
-// Return ONLY a valid JSON object in this exact format:
-// {
-//   "breakfast": {
-//     "name": "Meal Name",
-//     "description": "Brief description",
-//     "calories": 400,
-//     "macros": {"carbs": 45, "protein": 12, "fat": 8},
-//     "tags": ["Low GI", "Heart-Smart"],
-//     "ingredients": ["ingredient1", "ingredient2", "ingredient3"]
-//   },
-//   "lunch": { ... },
-//   "dinner": { ... },
-//   "snack": { ... }
-// }
+    const responsePromise = openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: DIABETIC_SYSTEM_PROMPT },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.5,
+      max_tokens: 600
+    });
 
-// Make sure meals are varied, nutritious, and appropriate for the user's health conditions.`;
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('OpenAI request timeout')), timeout)
+    );
 
-//     const response = await openai.chat.completions.create({
-//       model: 'gpt-4o-mini',
-//       messages: [
-//         {
-//           role: 'system',
-//           content: 'You are a professional nutritionist. Always respond with valid JSON only, no additional text.'
-//         },
-//         {
-//           role: 'user',
-//           content: prompt
-//         }
-//       ],
-//       temperature: 1,
-//       max_tokens: 2000
-//     });
+    const response = await Promise.race([responsePromise, timeoutPromise]);
+    const content = response.choices[0].message.content.trim();
 
-//     const content = response.choices[0].message.content.trim();
-    
-//     // Parse JSON response
-//     let mealPlanData;
-//     try {
-//       // Remove markdown code blocks if present
-//       const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
-//       const jsonString = jsonMatch ? jsonMatch[1] : content;
-//       mealPlanData = JSON.parse(jsonString);
-//     } catch (parseError) {
-//       console.error('Failed to parse OpenAI response:', parseError);
-//       throw new Error('Failed to parse meal plan response');
-//     }
+    try {
+      const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
+      const jsonString = jsonMatch ? jsonMatch[1] : content;
+      const parsed = JSON.parse(jsonString);
+      return {
+        verdict: parsed.verdict || 'Eat with care',
+        reason: parsed.reason || '',
+        safePortion: parsed.safePortion || '',
+        sugarImpact: parsed.sugarImpact || 'Moderate',
+        betterAlternatives: Array.isArray(parsed.betterAlternatives) ? parsed.betterAlternatives : [],
+        tips: Array.isArray(parsed.tips) ? parsed.tips : [],
+      };
+    } catch (parseError) {
+      console.error('checkFoodSafetyWithAI parse error:', parseError);
+      throw new Error('Failed to parse food check response');
+    }
+  } catch (error) {
+    console.error('checkFoodSafetyWithAI error:', error.message);
+    throw error;
+  }
+}
 
-//     // Convert to our meal format
-//     const meals = [
-//       {
-//         mealType: 'Breakfast',
-//         name: mealPlanData.breakfast.name,
-//         description: mealPlanData.breakfast.description,
-//         calories: mealPlanData.breakfast.calories,
-//         macros: mealPlanData.breakfast.macros,
-//         tags: mealPlanData.breakfast.tags || [],
-//         ingredients: mealPlanData.breakfast.ingredients || []
-//       },
-//       {
-//         mealType: 'Lunch',
-//         name: mealPlanData.lunch.name,
-//         description: mealPlanData.lunch.description,
-//         calories: mealPlanData.lunch.calories,
-//         macros: mealPlanData.lunch.macros,
-//         tags: mealPlanData.lunch.tags || [],
-//         ingredients: mealPlanData.lunch.ingredients || []
-//       },
-//       {
-//         mealType: 'Dinner',
-//         name: mealPlanData.dinner.name,
-//         description: mealPlanData.dinner.description,
-//         calories: mealPlanData.dinner.calories,
-//         macros: mealPlanData.dinner.macros,
-//         tags: mealPlanData.dinner.tags || [],
-//         ingredients: mealPlanData.dinner.ingredients || []
-//       },
-//       {
-//         mealType: 'Snack',
-//         name: mealPlanData.snack.name,
-//         description: mealPlanData.snack.description,
-//         calories: mealPlanData.snack.calories,
-//         macros: mealPlanData.snack.macros,
-//         tags: mealPlanData.snack.tags || [],
-//         ingredients: mealPlanData.snack.ingredients || []
-//       }
-//     ];
-
-//     return meals;
-//   } catch (error) {
-//     console.error('OpenAI meal plan generation error:', error);
-//     throw error;
-//   }
-// }
+// ---------------------------------------------------------------------------
+// 3) Sugar-safe food swaps
+// ---------------------------------------------------------------------------
 
 /**
- * Generate AI chat response using OpenAI
+ * Suggest sugar-safe swaps for a food / craving.
  */
+export async function generateFoodSwapsWithAI(user, foodName) {
+  if (!openai) return null;
+  const timeout = 12000;
+
+  try {
+    const context = buildDiabeticContext(user);
+
+    const prompt = `${context}
+
+Suggest 4 SUGAR-SAFE swaps for: "${foodName}".
+Each swap must be culturally appropriate (use roti, rice, daal, salan, qeema, biryani, fruits etc. when relevant), affordable for the user's budget and quick to prepare.
+
+Return JSON only:
+{
+  "swaps": [
+    {
+      "original": "${foodName}",
+      "swap": "name of the swap",
+      "portion": "everyday-unit portion, e.g. '1 roti + ½ cup daal'",
+      "sugarImpact": "Low" | "Moderate",
+      "why": "1 sentence why this is better for blood sugar"
+    }
+  ]
+}`;
+
+    const responsePromise = openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: DIABETIC_SYSTEM_PROMPT },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.7,
+      max_tokens: 700
+    });
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('OpenAI request timeout')), timeout)
+    );
+
+    const response = await Promise.race([responsePromise, timeoutPromise]);
+    const content = response.choices[0].message.content.trim();
+
+    const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
+    const jsonString = jsonMatch ? jsonMatch[1] : content;
+    const parsed = JSON.parse(jsonString);
+
+    return Array.isArray(parsed.swaps) ? parsed.swaps : [];
+  } catch (error) {
+    console.error('generateFoodSwapsWithAI error:', error.message);
+    throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 4) Weekly grocery list
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a sugar-safe weekly grocery list based on the user's profile (and an
+ * optional list of meal names already planned).
+ */
+export async function generateGroceryListWithAI(user, plannedMeals = []) {
+  if (!openai) return null;
+  const timeout = 15000;
+
+  try {
+    const context = buildDiabeticContext(user);
+    const mealsHint = plannedMeals.length
+      ? `Planned meals this week: ${plannedMeals.slice(0, 28).join('; ')}.`
+      : 'No specific meals planned yet — assume a typical diabetic-friendly week.';
+
+    const prompt = `${context}
+
+Build a WEEKLY GROCERY LIST that is diabetic-safe, culturally appropriate (South Asian / Pakistani / Indian friendly) and matches the user's budget & cooking time.
+${mealsHint}
+
+Group items by category. Use everyday units (kg, g, packs, pieces, dozen, cups). Include healthy local staples (atta, basmati rice in small qty, daal, chickpeas, vegetables, lean chicken / fish, eggs, plain yoghurt, nuts/seeds, low-sugar fruits like apple, guava, pear, berries).
+Avoid: white sugar, soft drinks, fruit juice, sweets / mithai, full-cream sweetened products.
+
+Return JSON only:
+{
+  "categories": [
+    {
+      "name": "Vegetables",
+      "items": [
+        { "name": "Spinach", "quantity": "500 g", "note": "for daal palak, optional" }
+      ]
+    },
+    { "name": "Fruits (low sugar)", "items": [...] },
+    { "name": "Grains & Pulses", "items": [...] },
+    { "name": "Protein", "items": [...] },
+    { "name": "Dairy & Eggs", "items": [...] },
+    { "name": "Pantry / Spices", "items": [...] },
+    { "name": "Snacks (diabetic-safe)", "items": [...] }
+  ],
+  "avoid": ["item 1", "item 2"]
+}`;
+
+    const responsePromise = openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: DIABETIC_SYSTEM_PROMPT },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.6,
+      max_tokens: 1500
+    });
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('OpenAI request timeout')), timeout)
+    );
+
+    const response = await Promise.race([responsePromise, timeoutPromise]);
+    const content = response.choices[0].message.content.trim();
+
+    const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
+    const jsonString = jsonMatch ? jsonMatch[1] : content;
+    const parsed = JSON.parse(jsonString);
+
+    return {
+      categories: Array.isArray(parsed.categories) ? parsed.categories : [],
+      avoid: Array.isArray(parsed.avoid) ? parsed.avoid : [],
+    };
+  } catch (error) {
+    console.error('generateGroceryListWithAI error:', error.message);
+    throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 5) Care AI chat (diabetes-focused)
+// ---------------------------------------------------------------------------
+
 export async function generateChatResponse(userMessage, user, chatHistory = []) {
-  // Check if OpenAI is initialized
   if (!openai) {
     console.warn('OpenAI not initialized, returning null to use fallback response');
     return null;
   }
 
   try {
-    const healthConditions = user.healthConditions?.join(', ') || 'None';
-    const medications = user.medications?.map(m => `${m.name} ${m.dosage || ''}`).join(', ') || 'None';
-    
-    const systemPrompt = `You are a helpful AI nutrition companion for the NutriGuide app. You help users with:
-- Nutrition advice tailored to their health conditions
-- Meal planning guidance
-- Symptom tracking support
-- Medication reminders and interactions
-- General health and wellness questions
+    const context = buildDiabeticContext(user);
 
-User's Health Profile:
-- Health Conditions: ${healthConditions}
-- Medications: ${medications}
-- Diet Preferences: ${user.dietPreferences?.vegetarian ? 'Vegetarian' : ''} ${user.dietPreferences?.vegan ? 'Vegan' : ''} ${user.dietPreferences?.glutenFree ? 'Gluten-Free' : ''}
+    const systemPrompt = `${DIABETIC_SYSTEM_PROMPT}
 
-Important Guidelines:
-- Always provide evidence-based nutrition advice
-- Remind users to consult healthcare providers for medical decisions
-- Be empathetic and supportive
-- Keep responses concise but informative (2-3 paragraphs max)
-- Reference the user's health conditions when relevant
-- Never provide medical diagnoses or replace professional medical advice`;
+You are chatting with the user inside the app. Be empathetic, short (2-3 short paragraphs max) and practical.
+When asked "can I eat X" always give: verdict (Safe / With care / Avoid), a safe portion, and a quick reason about blood sugar.
+When the user is upset about a high reading, calm them first, then give 1-2 concrete next steps.
+Never replace doctor's advice. Mention consulting the doctor for any medication change or for HbA1c above 9 %.
+
+${context}`;
 
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -380,23 +479,29 @@ Important Guidelines:
 
     const aiResponse = response.choices[0].message.content.trim();
 
-    // Determine response type and confidence
     const lowerMessage = userMessage.toLowerCase();
     let responseType = 'general';
     let confidence = 0.85;
 
-    if (lowerMessage.includes('blood sugar') || lowerMessage.includes('glucose') || lowerMessage.includes('diabetes')) {
+    if (lowerMessage.includes('sugar') || lowerMessage.includes('glucose') ||
+        lowerMessage.includes('hba1c') || lowerMessage.includes('diabetes')) {
       responseType = 'blood_sugar';
-      confidence = 0.90;
-    } else if (lowerMessage.includes('meal') || lowerMessage.includes('plan') || lowerMessage.includes('food') || lowerMessage.includes('diet')) {
+      confidence = 0.92;
+    } else if (lowerMessage.includes('eat') || lowerMessage.includes('can i have') ||
+               lowerMessage.includes('food') || lowerMessage.includes('meal') ||
+               lowerMessage.includes('roti') || lowerMessage.includes('rice') ||
+               lowerMessage.includes('biryani') || lowerMessage.includes('fruit')) {
       responseType = 'meal_plan';
       confidence = 0.92;
-    } else if (lowerMessage.includes('medication') || lowerMessage.includes('medicine') || lowerMessage.includes('pill')) {
+    } else if (lowerMessage.includes('medicine') || lowerMessage.includes('medication') ||
+               lowerMessage.includes('insulin') || lowerMessage.includes('metformin') ||
+               lowerMessage.includes('pill')) {
       responseType = 'medication';
       confidence = 0.88;
-    } else if (lowerMessage.includes('symptom') || lowerMessage.includes('track') || lowerMessage.includes('log')) {
+    } else if (lowerMessage.includes('symptom') || lowerMessage.includes('dizzy') ||
+               lowerMessage.includes('tired') || lowerMessage.includes('thirsty')) {
       responseType = 'symptoms';
-      confidence = 0.90;
+      confidence = 0.88;
     }
 
     return {

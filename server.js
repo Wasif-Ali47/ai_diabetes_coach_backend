@@ -2,11 +2,21 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import dns from 'dns';
 import { startReminderPushScheduler } from './services/reminderPushScheduler.js';
 import { ensureFirebaseAdmin } from './utils/firebaseAdminInit.js';
 
-// Load environment variables
 dotenv.config();
+
+// Some ISPs / Windows resolvers fail SRV/TXT lookups required by mongodb+srv://
+// (we see ESERVFAIL on queryTxt). Force a reliable public DNS resolver so the
+// Atlas connection string can be resolved regardless of system DNS health.
+try {
+  dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+  console.log('[dns] Using public resolvers:', dns.getServers().join(', '));
+} catch (e) {
+  console.warn('[dns] Failed to override DNS resolvers:', e.message);
+}
 
 const app = express();
 
@@ -97,7 +107,7 @@ console.log('   POST /api/admin/notifications/broadcast');
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
-    message: 'NutriGuide API is running',
+    message: 'Diabetic Diet AI Coach API is running',
     timestamp: new Date().toISOString()
   });
 });
@@ -120,13 +130,18 @@ app.use((req, res) => {
   });
 });
 
-// Connect to MongoDB
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb+srv://yasirkh261:yasirkh261@cluster0.yhwramo.mongodb.net/nutriguide?retryWrites=true&w=majority&appName=Cluster0"
+const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || 'diabetic_diet_ai_coach';
 const PORT = process.env.PORT || 5027;
 
-mongoose.connect(MONGODB_URI)
+if (!MONGODB_URI) {
+  console.error('❌ MONGODB_URI is not set. Add it to backend/.env');
+  process.exit(1);
+}
+
+mongoose.connect(MONGODB_URI, { dbName: MONGODB_DB_NAME })
   .then(() => {
-    console.log('✅ Connected to MongoDB');
+    console.log(`✅ Connected to MongoDB (db: ${MONGODB_DB_NAME})`);
     const fb = ensureFirebaseAdmin();
     console.log('[reminderPush] Firebase Admin at startup:', fb ? 'ready (FCM can send)' : 'missing credentials (reminder pushes will not send)');
     startReminderPushScheduler();

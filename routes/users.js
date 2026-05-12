@@ -26,15 +26,32 @@ router.put('/profile/body', authenticate, [
   body('activityLevel').isIn(['Sedentary', 'Lightly Active', 'Moderately Active', 'Very Active', 'Extremely Active']).optional()
 ], userController.updateBodyInfo);
 
-// Update health conditions
+// Update health conditions (incl. diabetes-specific fields)
 router.put('/profile/health', authenticate, [
   body('healthConditions').isArray().optional(),
-  body('medications').isArray().optional()
+  body('medications').isArray().optional(),
+  body('diabetesType').isIn([
+    'Type 1',
+    'Type 2',
+    'Pre-diabetes',
+    'Insulin Resistance',
+    'Gestational',
+    'Obesity (At Risk)',
+    'Family History (At Risk)',
+    'Not Sure'
+  ]).optional(),
+  body('fastingSugar').isFloat({ min: 0, max: 800 }).optional(),
+  body('hba1c').isFloat({ min: 0, max: 25 }).optional()
 ], userController.updateHealthConditions);
 
-// Update diet preferences
+// Update diet preferences (incl. local foods, budget, cooking time)
 router.put('/profile/diet', authenticate, [
-  body('dietPreferences').isObject().optional()
+  body('dietPreferences').isObject().optional(),
+  body('foodLikes').isArray().optional(),
+  body('foodDislikes').isArray().optional(),
+  body('localFoodPreferences').isArray().optional(),
+  body('budget').isIn(['Low', 'Medium', 'High', 'Flexible']).optional(),
+  body('cookingTime').isIn(['Quick (<20 min)', 'Moderate (20-40 min)', 'Relaxed (40+ min)']).optional()
 ], userController.updateDietPreferences);
 
 // Update settings

@@ -16,4 +16,16 @@ router.get('/history', authenticate, chatController.getChatHistory);
 // Clear chat history
 router.delete('/history', authenticate, chatController.clearChatHistory);
 
+// Get care entitlement status
+router.get('/entitlement', authenticate, chatController.getCareEntitlement);
+
+// Verify in-app purchase and unlock premium
+router.post('/iap/verify', authenticate, [
+  body('platform').optional().isIn(['android', 'ios', 'web']),
+  body('productId').trim().notEmpty(),
+  body('purchaseToken').trim().notEmpty(),
+  body('packageName').optional().trim(),
+  body('transactionId').optional().trim(),
+], chatController.verifyCarePurchase);
+
 export default router;

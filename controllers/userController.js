@@ -161,11 +161,24 @@ export const updateHealthConditions = async (req, res) => {
       });
     }
 
-    const { healthConditions, medications } = req.body;
+    const {
+      healthConditions,
+      medications,
+      diabetesType,
+      fastingSugar,
+      hba1c
+    } = req.body;
     const updateData = {};
 
     if (healthConditions !== undefined) updateData.healthConditions = healthConditions;
     if (medications !== undefined) updateData.medications = medications;
+    if (diabetesType !== undefined) updateData.diabetesType = diabetesType;
+    if (fastingSugar !== undefined && fastingSugar !== null && fastingSugar !== '') {
+      updateData.fastingSugar = Number(fastingSugar);
+    }
+    if (hba1c !== undefined && hba1c !== null && hba1c !== '') {
+      updateData.hba1c = Number(hba1c);
+    }
 
 
     const user = await User.findByIdAndUpdate(
@@ -212,12 +225,25 @@ export const updateDietPreferences = async (req, res) => {
       });
     }
 
-    const { dietPreferences } = req.body;
+    const {
+      dietPreferences,
+      foodLikes,
+      foodDislikes,
+      localFoodPreferences,
+      budget,
+      cookingTime
+    } = req.body;
 
+    const updateData = { dietPreferences: dietPreferences || {} };
+    if (Array.isArray(foodLikes)) updateData.foodLikes = foodLikes;
+    if (Array.isArray(foodDislikes)) updateData.foodDislikes = foodDislikes;
+    if (Array.isArray(localFoodPreferences)) updateData.localFoodPreferences = localFoodPreferences;
+    if (budget !== undefined && budget !== null && budget !== '') updateData.budget = budget;
+    if (cookingTime !== undefined && cookingTime !== null && cookingTime !== '') updateData.cookingTime = cookingTime;
 
     const user = await User.findByIdAndUpdate(
       req.userId,
-      { dietPreferences: dietPreferences || {} },
+      updateData,
       { new: true, runValidators: true }
     ).select('-password');
 

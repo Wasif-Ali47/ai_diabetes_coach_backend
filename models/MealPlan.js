@@ -11,6 +11,10 @@ const mealSchema = new mongoose.Schema({
     required: true
   },
   description: String,
+  // Portion in everyday units (e.g. "1 roti + ½ cup daal + salad")
+  portionGuide: { type: String, default: '' },
+  // Estimated blood-sugar impact: 'Low' | 'Moderate' | 'Watch'
+  sugarImpact: { type: String, default: 'Low' },
   calories: {
     type: Number,
     required: true
@@ -20,7 +24,7 @@ const mealSchema = new mongoose.Schema({
     protein: { type: Number, default: 0 },
     fat: { type: Number, default: 0 }
   },
-  tags: [String], // e.g., ['Low GI', 'Heart-Smart', 'Low Sodium']
+  tags: [String], // e.g., ['Low GI', 'Diabetes-friendly']
   ingredients: [String]
 }, { _id: false });
 
