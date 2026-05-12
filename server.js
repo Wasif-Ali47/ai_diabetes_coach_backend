@@ -1,12 +1,13 @@
+// IMPORTANT: load .env BEFORE any other import so modules that read
+// process.env at the top level (e.g. openaiService.js) see the values.
+import 'dotenv/config';
+
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import dns from 'dns';
 import { startReminderPushScheduler } from './services/reminderPushScheduler.js';
 import { ensureFirebaseAdmin } from './utils/firebaseAdminInit.js';
-
-dotenv.config();
 
 // Some ISPs / Windows resolvers fail SRV/TXT lookups required by mongodb+srv://
 // (we see ESERVFAIL on queryTxt). Force a reliable public DNS resolver so the

@@ -1,12 +1,23 @@
 import OpenAI from 'openai';
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// Lazily construct the OpenAI client so we read process.env AFTER dotenv has
+// finished loading, regardless of which module is evaluated first.
+let _openai = null;
+let _warnedMissing = false;
 
-let openai = null;
-if (OPENAI_API_KEY) {
-  openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-} else {
-  console.warn('⚠️  OPENAI_API_KEY not set. AI features will use fallback responses.');
+function getOpenAI() {
+  if (_openai) return _openai;
+  const key = process.env.OPENAI_API_KEY;
+  if (key && key.trim().length > 0) {
+    _openai = new OpenAI({ apiKey: key });
+    console.log('🤖 OpenAI client initialised (key …' + key.slice(-6) + ')');
+    return _openai;
+  }
+  if (!_warnedMissing) {
+    console.warn('⚠️  OPENAI_API_KEY not set. AI features will use fallback responses.');
+    _warnedMissing = true;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +74,7 @@ Return ONLY valid JSON when a JSON schema is requested. No markdown, no extra co
  * Generate a single day's meal plan optimised for diabetic users.
  */
 export async function generateMealPlanDayWithAI(user, dailyCalorieTarget, dailyMacroTargets, dayNumber) {
+  const openai = getOpenAI();
   if (!openai) return null;
   const timeout = 15000;
 
@@ -152,6 +164,7 @@ Return JSON only:
  * Generate the full 7-day diabetic meal plan in one OpenAI call.
  */
 export async function generateMealPlanWithAI(user, dailyCalorieTarget, dailyMacroTargets) {
+  const openai = getOpenAI();
   if (!openai) return null;
   const timeout = 35000;
 
@@ -241,6 +254,7 @@ Return JSON only:
  * Decide whether a specific food/dish is safe for the diabetic user.
  */
 export async function checkFoodSafetyWithAI(user, foodName, portion = '') {
+  const openai = getOpenAI();
   if (!openai) return null;
   const timeout = 12000;
 
@@ -310,6 +324,7 @@ Return JSON only:
  * Suggest sugar-safe swaps for a food / craving.
  */
 export async function generateFoodSwapsWithAI(user, foodName) {
+  const openai = getOpenAI();
   if (!openai) return null;
   const timeout = 12000;
 
@@ -371,6 +386,7 @@ Return JSON only:
  * optional list of meal names already planned).
  */
 export async function generateGroceryListWithAI(user, plannedMeals = []) {
+  const openai = getOpenAI();
   if (!openai) return null;
   const timeout = 15000;
 
@@ -443,6 +459,7 @@ Return JSON only:
 // ---------------------------------------------------------------------------
 
 export async function generateChatResponse(userMessage, user, chatHistory = []) {
+  const openai = getOpenAI();
   if (!openai) {
     console.warn('OpenAI not initialized, returning null to use fallback response');
     return null;
@@ -513,3 +530,4 @@ ${context}`;
     throw error;
   }
 }
+// df
