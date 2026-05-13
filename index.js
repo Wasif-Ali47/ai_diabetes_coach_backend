@@ -97,6 +97,57 @@ app.use('/api/export', exportRoutes);
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin', adminRoutes);
 
+// API index (for humans / monitoring — lists main route groups)
+app.get('/api', (req, res) => {
+  res.json({
+    name: 'Diabetic Diet AI Coach API',
+    version: '1.0.0',
+    health: '/api/health',
+    routes: {
+      auth: {
+        base: '/api/auth',
+        endpoints: [
+          'POST /register',
+          'POST /login',
+          'POST /guest',
+          'GET /verify'
+        ]
+      },
+      users: {
+        base: '/api/users',
+        note: 'All require Bearer token except none on this mount — use auth first.',
+        endpoints: [
+          'GET /profile',
+          'PUT /profile/personal',
+          'PUT /profile/body',
+          'PUT /profile/health',
+          'PUT /profile/diet',
+          'PUT /settings',
+          'PUT /onboarding/complete',
+          'DELETE /account'
+        ]
+      },
+      mealPlans: {
+        base: '/api/meal-plans',
+        endpoints: [
+          'POST /generate',
+          'POST /check-food',
+          'POST /swap',
+          'GET /grocery-list',
+          'GET /current',
+          'GET /',
+          'GET /:id',
+          'PUT /:id/days/:dayNumber'
+        ]
+      },
+      chat: { base: '/api/chat', endpoints: ['POST /message', 'GET /history', 'GET /entitlement', 'POST /iap/verify'] },
+      reminders: { base: '/api/reminders', endpoints: ['GET /', 'POST /', 'PUT /:id', 'DELETE /:id'] },
+      export: { base: '/api/export', endpoints: ['GET /data'] },
+      notifications: { base: '/api/notifications', endpoints: ['POST /register-token', 'POST /send'] }
+    }
+  });
+});
+
 // Log registered admin routes on startup
 console.log('📋 Admin routes registered:');
 console.log('   GET  /api/admin/test');

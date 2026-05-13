@@ -234,12 +234,35 @@ export const updateDietPreferences = async (req, res) => {
       cookingTime
     } = req.body;
 
-    const updateData = { dietPreferences: dietPreferences || {} };
+    const existingUser = await User.findById(req.userId).select('dietPreferences');
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const updateData = {};
+
+    if (dietPreferences !== undefined && dietPreferences !== null && typeof dietPreferences === 'object') {
+      const prev = existingUser.dietPreferences && typeof existingUser.dietPreferences.toObject === 'function'
+        ? existingUser.dietPreferences.toObject()
+        : (existingUser.dietPreferences || {});
+      updateData.dietPreferences = { ...prev, ...dietPreferences };
+    }
+
     if (Array.isArray(foodLikes)) updateData.foodLikes = foodLikes;
     if (Array.isArray(foodDislikes)) updateData.foodDislikes = foodDislikes;
     if (Array.isArray(localFoodPreferences)) updateData.localFoodPreferences = localFoodPreferences;
     if (budget !== undefined && budget !== null && budget !== '') updateData.budget = budget;
     if (cookingTime !== undefined && cookingTime !== null && cookingTime !== '') updateData.cookingTime = cookingTime;
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No diet fields to update'
+      });
+    }
 
     const user = await User.findByIdAndUpdate(
       req.userId,
@@ -253,7 +276,6 @@ export const updateDietPreferences = async (req, res) => {
         message: 'User not found'
       });
     }
-
 
     res.json({
       success: true,
@@ -276,11 +298,31 @@ export const updateSettings = async (req, res) => {
   try {
     const { settings } = req.body;
 
+    const existing = await User.findById(req.userId).select('settings');
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const prev = existing.settings && typeof existing.settings.toObject === 'function'
+      ? existing.settings.toObject()
+      : (existing.settings || {});
+    const merged = { ...prev, ...(settings && typeof settings === 'object' ? settings : {}) };
+
     const user = await User.findByIdAndUpdate(
       req.userId,
-      { settings: settings || {} },
+      { settings: merged },
       { new: true, runValidators: true }
     ).select('-password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
 
     res.json({
       success: true,

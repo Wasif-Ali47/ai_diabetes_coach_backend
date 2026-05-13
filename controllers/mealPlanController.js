@@ -1,5 +1,6 @@
 import MealPlan from '../models/MealPlan.js';
 import User from '../models/User.js';
+import { validationResult } from 'express-validator';
 import {
   generateMealPlanWithAI,
   generateMealPlanDayWithAI,
@@ -503,10 +504,12 @@ function getFallbackMeals(dayIndex, calorieTarget) {
 // ---------------------------------------------------------------------------
 export const checkFood = async (req, res) => {
   try {
-    const { food, portion } = req.body;
-    if (!food || typeof food !== 'string' || !food.trim()) {
-      return res.status(400).json({ success: false, message: 'Food name is required' });
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, message: 'Validation error', errors: errors.array() });
     }
+
+    const { food, portion } = req.body;
 
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
@@ -550,10 +553,12 @@ export const checkFood = async (req, res) => {
 // ---------------------------------------------------------------------------
 export const foodSwaps = async (req, res) => {
   try {
-    const { food } = req.body;
-    if (!food || typeof food !== 'string' || !food.trim()) {
-      return res.status(400).json({ success: false, message: 'Food name is required' });
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, message: 'Validation error', errors: errors.array() });
     }
+
+    const { food } = req.body;
 
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });

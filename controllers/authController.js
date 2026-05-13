@@ -152,7 +152,7 @@ export const login = async (req, res) => {
 export const guestLogin = async (req, res) => {
   try {
     const { deviceId } = req.body;
-    const guestEmail = `guest_${deviceId || Date.now()}@nutriguide.app`;
+    const guestEmail = `guest_${deviceId || Date.now()}@diabeticcoach.app`;
 
     let user = await User.findOne({ email: guestEmail });
     
@@ -209,6 +209,13 @@ export const verifyToken = async (req, res) => {
       return res.status(401).json({
         success: false,
         message: 'User not found'
+      });
+    }
+
+    if (user.active === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Account has been deactivated.'
       });
     }
 

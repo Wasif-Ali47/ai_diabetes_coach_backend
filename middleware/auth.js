@@ -34,6 +34,14 @@ export const authenticate = async (req, res, next) => {
       });
     }
 
+    if (user.active === false) {
+      console.log('[authenticate] ❌ User account inactive:', decoded.userId);
+      return res.status(403).json({
+        success: false,
+        message: 'Account has been deactivated.'
+      });
+    }
+
     console.log('[authenticate] ✓ Authentication successful. User:', user.email);
     req.user = user;
     req.userId = decoded.userId;

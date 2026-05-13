@@ -7,11 +7,11 @@ const router = express.Router();
 // Get all doctors with optional filters
 router.get('/', optionalAuth, doctorController.getAllDoctors);
 
+// Search doctors (must be before `/:id` or "search" is captured as an id)
+router.get('/search/:query', optionalAuth, doctorController.searchDoctors);
+
 // Get doctor by ID
 router.get('/:id', optionalAuth, doctorController.getDoctorById);
-
-// Search doctors
-router.get('/search/:query', optionalAuth, doctorController.searchDoctors);
 
 // Admin: Create doctor (for seeding database)
 router.post('/', authenticate, doctorController.createDoctor);
